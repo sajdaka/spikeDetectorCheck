@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Tuple, Protocol, Union
+from typing import Dict, Any, Optional, Tuple, Protocol, Union, List
 import numpy as np
 from scipy import signal, stats
 from scipy import interpolate
@@ -10,13 +10,22 @@ from scipy.stats import linregress
 from scipy.interpolate import interp1d
 import logging
 
+from SpikeDetection import BaselineNormalizer
+
 logger = logging.getLogger(__name__)
 
 @dataclass
 class PreprocessingResult:
     data: np.ndarray
-    metadata: Dict[str, Any]
-    preprocessing_steps: list[str]
+    metadata: Optional[Dict[str, Any]]
+    preprocessing_steps: List[str]
+    
+    def __init__(self, data: np.ndarray, metadata: Optional[Dict[str, Any]], preprocessing_steps: Optional[List[str]]):
+        self.data = data
+        if metadata is not None:
+            self.metadata = metadata
+        if preprocessing_steps is not None:
+            self.preprocessing_steps = preprocessing_steps
     
 class PreprocessingStrategy(Protocol):
     
@@ -58,6 +67,7 @@ class EEGPreprocessor(BasePreprocessor):
         result = PreprocessingResult(
             data=data.copy(),
             metadata={'original_shape': data.shape},
+            preprocessing_steps=None
         )
         
         try:
@@ -95,6 +105,7 @@ class EEGPreprocessor(BasePreprocessor):
     
     def _interpolate_artifacts(self, data: np.ndarray, threshold: float) -> Tuple[np.ndarray, list]:
         cleaned_signal = data.copy()
+        threshold = np.std(cleaned_signal) * threshold
         artifact_mask = np.abs(data) > threshold
         artifact_indices = np.where(artifact_mask)
         
@@ -153,9 +164,13 @@ class EEGPreprocessor(BasePreprocessor):
     
 class PhotometryPreprocessor(BasePreprocessor):
     
-    def __init__(self, name: str, sample_rate: float = 1000.0):
+    def __init__(self, name: str, sample_rate: float = 1000.0, baseline_start_time: float = 0.0, baseline_end_time: float = 0.0):
         super().__init__(name)
         self.sample_rate = sample_rate
+        self.baseline_start_time = baseline_start_time
+        self.baseline_end_time = baseline_end_time
+        
+        self.normalizer = BaselineNormalizer()
         
 class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
     
@@ -163,8 +178,10 @@ class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
                  sample_rate: float = 1000.0,
                  lowpass_cutoff: float = 10.0,
                  savgol_window: int = 301,
-                 savgol_polyorder: int = 4):
-        super().__init__("Meling_Photometry", sample_rate)
+                 savgol_polyorder: int = 4,
+                 baseline_start_time: float = 0.0,
+                 baseline_end_time: float = 0.0):
+        super().__init__("Meling_Photometry", sample_rate, baseline_start_time, baseline_end_time)
         self.lowpass_cutoff = lowpass_cutoff
         self.savgol_window = savgol_window
         self.savgol_polyorder = savgol_polyorder
@@ -180,7 +197,8 @@ class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
             metadata={
                 'original_lengths': [len(photo_data), len(isos_data)],
                 'processing_order': 'denoise_first' if denoise_first else 'detrend_first'
-            }
+            },
+            preprocessing_steps=None
         )
         
         try:
@@ -258,7 +276,7 @@ class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
         
         try:
             params, _ = curve_fit(
-                self._fit_double_exponential,
+                self._double_exponential,
                 time_vector,
                 signal,
                 p0=initial_params,
@@ -273,9 +291,9 @@ class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
             expfit = np.polyval(poly_coeffs, time_vector)
             return poly_coeffs, expfit
         
-    def _double_exponential(self, t, const, amp_fast, amp_slow, tau_slow, tau_muliplier):
+    def _double_exponential(self, t, const, amp_fast, amp_slow, tau_slow, tau_multiplier):
         
-        tau_fast = tau_slow * tau_muliplier
+        tau_fast = tau_slow * tau_multiplier
         return const+ amp_slow * np.exp(-t/tau_slow) + amp_fast * np.exp(-t/tau_fast)
     
     def _calculate_df_f(self,
@@ -288,7 +306,10 @@ class MeilingPhotometryPreprocessor(PhotometryPreprocessor):
         df_f_precorrected = photo_cleaned / photo_expfit
         df_f_corrected = photo_corrected / photo_expfit
         
-        z_df_f = stats.zscore(df_f_corrected)
+        if self.baseline_end_time > 0.0 and self.baseline_end_time > self.baseline_start_time:
+            z_df_f = self.normalizer.baseline_zscore(df_f_corrected, self.baseline_end_time, self.baseline_start_time, self.sample_rate)
+        else:
+            z_df_f = stats.zscore(df_f_corrected)
         
         return df_f_precorrected, df_f_corrected, z_df_f
     
@@ -298,11 +319,15 @@ class ChandniPhotometryPreprocessor(PhotometryPreprocessor):
                  sample_rate: float = 1000.0,
                  gaussian_sigma: float = 75.0,
                  savgol_window: int = 301,
-                 savgol_polyorder: int = 4):
-        super().__init__("Chandni_Photometry", sample_rate)
+                 savgol_polyorder: int = 4,
+                 baseline_start_time: float = 0.0,
+                 baseline_end_time: float = 0.0):
+        super().__init__("Chandni_Photometry", sample_rate, baseline_start_time, baseline_end_time)
+
         self.gaussian_sigma = gaussian_sigma
         self.savgol_window = savgol_window
         self.savgol_polyorder = savgol_polyorder
+
         
     def process(self,
                 photo_data: np.ndarray,
@@ -313,7 +338,8 @@ class ChandniPhotometryPreprocessor(PhotometryPreprocessor):
             metadata={
                 'original_lengths': [len(photo_data), len(isos_data)],
                 'processing_method': 'chandni'
-            }
+            },
+            preprocessing_steps=None
         )        
         
         try:
@@ -323,7 +349,10 @@ class ChandniPhotometryPreprocessor(PhotometryPreprocessor):
             
             df_f_preprocessed = (photo - isos) / isos
             df_f_processed = (photo_filtered - isos_filtered) /isos_filtered
-            z_df_f = stats.zscore(df_f_processed)
+            if self.baseline_end_time > 0 and self.baseline_end_time > self.baseline_start_time:
+                z_df_f = self.normalizer.baseline_zscore(df_f_processed, self.baseline_end_time, self.baseline_start_time, self.sample_rate)
+            else:
+                z_df_f = stats.zscore(df_f_processed)
             
             result.data = df_f_processed
             result.metadata.update({
@@ -354,12 +383,112 @@ class ChandniPhotometryPreprocessor(PhotometryPreprocessor):
         
         return photo_filtered, isos_filtered
     
+    
+class ModularPhotometryPreprocessor(PhotometryPreprocessor):
+
+    def __init__(self, photometry_preprocessors: Tuple[str, Any], sample_rate: float = 1000.0, baseline_start_time: float = 0.0, baseline_end_time: float = 0.0):
+        super().__init__("Modular_Photometry", sample_rate, baseline_start_time, baseline_end_time)
+        
+        self.meiling_processor = photometry_preprocessors['meiling']
+        self.chandni_processor = photometry_preprocessors['chandni']
+        
+        
+    def process(self,
+                photo_data: np.ndarray,
+                isos_data: np.ndarray,
+                processing_steps: List[str],
+                time_vector: np.ndarray = None,
+                **kwargs) -> PreprocessingResult:
+        
+        result = PreprocessingResult(
+            data=np.array([photo_data.copy(), isos_data.copy()]),
+             metadata={
+                'original_lengths': [len(photo_data), len(isos_data)],
+                'processing_order': 'modular'
+            },
+            preprocessing_steps=processing_steps
+            
+        )
+        
+        try:
+            current_photo = photo_data.copy()
+            current_isos = isos_data.copy()
+            
+            photo_exptfit = None
+            photo_est_motion = None
+            
+            for i, step in enumerate(processing_steps):
+                if step == "None" or step == "":
+                    continue
+                
+                logger.info(f"Applying step {i+1}: {step}")
+                
+                if step == "Meiling Denoise":
+                    current_photo, current_isos = self._apply_meiling_denoise(
+                        current_photo, current_isos
+                    )
+                elif step == "Meiling Detrend":
+                    current_photo, photo_expfit, photo_est_motion, current_isos = self._apply_meiling_detrend(
+                        current_photo, current_isos, time_vector
+                    )
+                elif step == "Chandni Gaussian Filter":
+                    current_photo, current_isos = self._apply_chandni_gaussian(
+                        current_photo, current_isos
+                    )
+                else:
+                    logger.warning(f"Unknown processing step: {step}")
+            
+            if photo_expfit is not None:
+                df_f_precorrected, df_f_corrected, z_df_f = self.meiling_processor._calculate_df_f(
+                    current_photo, photo_expfit, photo_est_motion
+                )
+                result.data = df_f_corrected
+            else:
+                df_f_corrected = (current_photo - current_isos)/ current_isos
+                if self.baseline_end_time > 0 and self.baseline_end_time > self.baseline_start_time:
+                    self.normalizer.baseline_zscore(df_f_corrected, self.baseline_end_time, self.baseline_start_time, self.sample_rate)
+                else:
+                    z_df_f = stats.zscore(df_f_corrected)
+                result.data = df_f_corrected
+                
+            result.metadata.update({
+                'photo_processed': current_photo,
+                'isos_processed': current_isos,
+                'photo_expfit': photo_expfit,
+                'photo_est_motion': photo_est_motion,
+                'z_df_f': z_df_f,
+                'final_shape':result.data.shape
+            })
+            
+            logger.info(f"Photometry preprocessing complete using: {processing_steps}")
+            return result
+        
+        except Exception as e:
+            logger.error(f"Error in photometry preprocessing: {e}")
+            raise
+        
+    def _apply_meiling_denoise(self, photo: np.ndarray, isos: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        return self.meiling_processor._denoise_signals(photo, isos)
+    
+    def _apply_meiling_detrend(self, photo: np.ndarray, isos: np.ndarray,
+                               time_vector: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        return self.meiling_processor._detrend_signals(photo, isos, time_vector)
+    
+    def _apply_chandni_gaussian(self, photo: np.ndarray, isos:np.ndarray)-> Tuple[np.ndarray, np.ndarray]:
+        return self.chandni_processor._apply_gaussian_filter(photo, isos)
+
 class PreprocessingPipeline:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.eeg_preprocessor = self._create_eeg_preprocessor()
         self.photometry_preprocessors = self._create_photometry_preprocessors()
+        self.modular_preprocessor = ModularPhotometryPreprocessor(
+            sample_rate=config.get('photometry', {}).get('sample_rate', 1000.0),
+            baseline_start_time=self.config.get('baseline_start_time', 0),
+            baseline_end_time=self.config.get('baseline_end_time', 0),
+            photometry_preprocessors=self.photometry_preprocessors
+        )
         
     def _create_eeg_preprocessor(self) -> EEGPreprocessor:
         
@@ -380,13 +509,17 @@ class PreprocessingPipeline:
                 sample_rate=photo_config.get('sample_rate', 1000.0),
                 lowpass_cutoff=photo_config.get('lowpass_cutoff', 10.0),
                 savgol_window=photo_config.get('savgol_window', 301),
-                savgol_polyorder=photo_config.get('savgol_polyorder', 4)
+                savgol_polyorder=photo_config.get('savgol_polyorder', 4),
+                baseline_start_time=self.config.get('baseline_start_time', 0),
+                baseline_end_time=self.config.get('baseline_end_time', 0)
             ),
             'chandni': ChandniPhotometryPreprocessor(
                 sample_rate=photo_config.get('sample_rate', 1000.0),
                 gaussian_sigma=photo_config.get('gaussian_sigma', 75.0),
                 savgol_window=photo_config.get('savgol_window', 301),
-                savgol_polyorder=photo_config.get('savgol_polyorder', 4)
+                savgol_polyorder=photo_config.get('savgol_polyorder', 4),
+                baseline_start_time=self.config.get('baseline_start_time', 0),
+                baseline_end_time=self.config.get('baseline_end_time', 0)
             )
         }
         
@@ -399,7 +532,7 @@ class PreprocessingPipeline:
                            path: str = 'meiling',
                            **kwargs) -> PreprocessingResult:
         
-        if path not in self.photometry_preprocessors[path]:
+        if path not in self.photometry_preprocessors:
             raise ValueError(f"Unknown preprocessing pathway: {path}")
         
         preprocessor = self.photometry_preprocessors[path]
@@ -409,13 +542,22 @@ class PreprocessingPipeline:
         elif path == 'chandni':
             return preprocessor.process(photo_data, isos_data, **kwargs)
         
+    def process_photometry_modular(self,
+                                  photo_data: np.ndarray,
+                                  isos_data: np.ndarray,
+                                  processing_steps: List[str],
+                                  **kwargs) -> PreprocessingResult:
+        return self.modular_preprocessor.process(
+            photo_data, isos_data, processing_steps, **kwargs
+        )
+        
     def get_available_paths(self) -> list[str]:
         return list(self.photometry_preprocessors.keys())
     
-    def update_copnfig(self, new_config: Dict[str, Any]) -> None:
+    def update_config(self, new_config: Dict[str, Any]) -> None:
         self.config.update(new_config)
         self.eeg_preprocessor = self._create_eeg_preprocessor()
-        self.photometry_preprocessors = self._create_eeg_preprocessor()
+        self.photometry_preprocessors = self._create_photometry_preprocessors()
 
 
 if __name__ == "__main__":

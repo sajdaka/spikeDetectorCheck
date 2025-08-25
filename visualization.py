@@ -28,11 +28,11 @@ class InteractivePlotter:
                 max_plot_points=config.max_plot_points,
                 downsample_factor=config.downsample_factor,
                 figure_width=config.figure_width,
-                figure_height=config.figue_height,
+                figure_height=config.figure_height,
                 line_width=config.line_width,
                 spike_marker_size=config.spike_marker_size,
                 spike_marker_color=config.spike_marker_color,
-                default_render=config.default_renderer
+                default_renderer=config.default_renderer
             )
         else:
             self.config = PlotConfig()
@@ -41,7 +41,9 @@ class InteractivePlotter:
     
     def create_comprehensive_plot(self,
                                   eeg_data: np.ndarray,
+                                  eeg_raw: np.ndarray,
                                   photometry_data: Optional[np.ndarray] = None,
+                                  photo_raw: Optional[np.ndarray] = None,
                                   spikes: Optional[List] = None,
                                   time_vector: Optional[np.ndarray] = None,
                                   seizure_onset: Optional[int] = None,
@@ -55,10 +57,9 @@ class InteractivePlotter:
                 
             fig = make_subplots(
                 rows=n_rows,
-                cols=1,
+                cols=2,
                 subplot_titles=subplot_titles,
                 vertical_spacing=0.08,
-                shared_xaxes=True
             )
             
             if time_vector is None:
@@ -66,24 +67,21 @@ class InteractivePlotter:
                 
             if len(time_vector) > self.config.max_plot_points:
                 step = len(time_vector) // (self.config.max_plot_points // 2)
-                time_vector = time_vector[::step]
-                raw_data = raw_data[::step]
-                processed_data = processed_data[::step]
+                time_vector_trimed = time_vector[::step]
+                eeg_data_trimed = eeg_data[::step]
+                eeg_raw_trimed = eeg_raw[::step]
+                photometry_data_trimed = photometry_data[::step]
+                photo_raw_trimed = photo_raw[::step]
                 
-            fig = make_subplots(
-                rows=2,
-                cols=1,
-                subplot_titles=('Raw Signal', 'Preprocessed Signal'),
-                shared_xaxes=True,
-                vertical_spacing=0.1
-            )
+                
+
             
             fig.add_trace(
                 go.Scatter(
-                    x=time_vector,
-                    y=raw_data,
+                    x=time_vector_trimed,
+                    y=eeg_raw_trimed,
                     mode='lines',
-                    name='Raw Signal',
+                    name='Raw EEG Signal',
                     line=dict(width=self.config.line_width, color='blue')
                 ),
                 row=1, col=1
@@ -91,15 +89,36 @@ class InteractivePlotter:
             
             fig.add_trace(
                 go.Scatter(
-                    x=time_vector,
-                    y=processed_data,
+                    x=time_vector_trimed,
+                    y=eeg_data_trimed,
                     mode='lines',
                     name='Processed Signal',
                     line=dict(width=self.config.line_width, color='orange')
                 ),
+                row=1, col=2
+            )
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=time_vector_trimed,
+                    y=photo_raw_trimed,
+                    mode='lines',
+                    name='Raw Photometry',
+                    line=dict(width=self.config.line_width, color='yellow')
+                ),
                 row=2, col=1
             )
             
+            fig.add_trace(
+                go.Scatter(
+                    x=time_vector_trimed,
+                    y=photometry_data_trimed,
+                    mode='lines',
+                    name='Procesed Photometry',
+                    line= dict(width=self.config.line_width, color='green')
+                ),
+                row=2, col=2
+            )
             fig.update_layout(
                 title=title,
                 width=self.config.figure_width,
@@ -107,9 +126,15 @@ class InteractivePlotter:
                 showlegend=True
             )
             
+            if seizure_onset is not None:
+                fig.add_vline(x=seizure_onset, row=1, col=2, line_dash='dash', line_color='red')
+                fig.add_vline(x=seizure_onset, row=2, col=2, line_dash='dash', line_color='red')
+            
             fig.update_xaxes(title_text="Time (s.)", row=2, col=1)
             fig.update_yaxes(title_text="Amplitude", row=1, col=1)
             fig.update_yaxes(title_text="Amplitude", row=2, col=1)
+            
+            return fig
         except Exception as e:
             logger.error(f"Error creating plots: {e}")
             raise

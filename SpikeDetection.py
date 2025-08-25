@@ -1,4 +1,4 @@
-from typing import List, Protocol
+from typing import List, Protocol, Dict, Any
 from dataclasses import dataclass
 import numpy as np
 from scipy.signal import find_peaks
@@ -18,6 +18,7 @@ class SpikeDetectionParams:
     spkdur_max: float = 200.0
     channel: int = 9
     baseline_end_time: float = 0.0
+    baseline_start_time: float = 0.0
     
     def __post_init__(self):
         if self.fs <= 0:
@@ -54,14 +55,15 @@ class SignalProcessor(Protocol):
 class BaselineNormalizer:
     
     @staticmethod
-    def baseline_zscore(data: np.ndarray, end_baseline: float, fs: float) -> np.ndarray:
+    def baseline_zscore(data: np.ndarray, end_baseline: float, start_baseline: float, fs: float) -> np.ndarray:
         
         end_time = int(end_baseline * fs)
-        if end_time<= 0 or end_time >= len(data):
+        start_time = int(start_baseline * fs)
+        if end_time<= 0 or end_time >= len(data) or start_time >= end_time:
             logger.warning("Invalid baseline period: using full data set for normalization")
             baseline = data
         else:
-            baseline = data[:end_time]
+            baseline = data[start_time:end_time]
             
         baseline_mean = np.nanmean(baseline)
         baseline_std = np.nanstd(baseline)
@@ -90,20 +92,18 @@ class SpikeDetector:
         self.normalizer = BaselineNormalizer()
         logger.info(f"Initialized the SpikeDetector with the given parameters: {params}")
         
-    def detect_spikes(self, signal: np.ndarray, apply_normalization: bool = True) -> List[SpikeEvent]:
+    def detect_spikes(self, signal: np.ndarray) -> List[SpikeEvent]:
         
         try:
             signal = self._validate_input(signal)
             
-            if apply_normalization and self.params.baseline_end_time > 0:
-                signal = self.normalizer.baseline_zscore(signal, self.params.baseline_end_time, self.params.fs)
                 
-                spikes = self._detect_spikes_core(signal)
-                
-                filtered_spikes = self._filter_spikes(spikes, signal)
-                
-                logger.info(f"Detected {len(filtered_spikes)} spikes from the data")
-                return filtered_spikes
+            spikes = self._detect_spikes_core(signal)
+            
+            filtered_spikes = self._filter_spikes(spikes, signal)
+            
+            logger.info(f"Detected {len(filtered_spikes)} spikes from the data")
+            return filtered_spikes
         
         except Exception as e:
             logger.error(f"Error in spike detection: {e}")
@@ -229,7 +229,7 @@ class SpikeDetector:
                 
         return filtered
     
-    def get_detection_summary(self, spikes: List[SpikeEvent]) -> Dict:
+    def get_detection_summary(self, spikes: List[SpikeEvent]) -> Dict[str, Any]:
         
         if not spikes:
             return {
@@ -248,7 +248,7 @@ class SpikeDetector:
             'n_spikes': len(spikes),
             'spike_rate': len(spikes)/ duration_seconds if duration_seconds > 0 else 0,
             'mean_amplitude': np.mean(amplitudes),
-            'std_amplitudes': np.std(amplitudes),
+            'std_amplitude': np.std(amplitudes),
             'mean_width': np.mean(widths),
             'std_width': np.std(widths),
             'amplitude_range': (min(amplitudes), max(amplitudes)),

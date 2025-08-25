@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DataRecord:
     filename: str
-    metadata: Dict[str, Any]
     
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(filename={self.filename})"
@@ -26,7 +25,7 @@ class EEGRecord(DataRecord):
     
     @property
     def n_channels(self) -> int:
-        return self.data.shape[0] if self.data.ndmin == 2 else 1
+        return self.data.shape[0] if self.data.ndim == 2 else 1
     
     @property
     def n_samples(self) -> int:
@@ -84,7 +83,7 @@ class EEGLoader(DataLoader):
             recording = session.recordnodes[0].recordings[0]
             
             continuous = recording.continuous[0]
-            data = continuous.get_samples(0, min(self.max_samples, continuous.num_samples))
+            data = continuous.get_samples(0, self.max_samples)
             
             if data.ndim == 1:
                 data = data.reshape(1, -1)
@@ -94,16 +93,10 @@ class EEGLoader(DataLoader):
             
             events = self._extract_events(recording)
             
-            metadata = {
-                'session_info': {
-                    'start_time': recording.start_time,
-                    'duration': recording.duration,
-                }
-            }
+
             
             return EEGRecord(
                 filename=Path(filepath).name,
-                metadata=metadata,
                 data=data,
                 sample_rate=continuous.metadata['sample_rate'],
                 timestamps=continuous.timestamps[:data.shape[1]],
@@ -131,9 +124,9 @@ class EEGLoader(DataLoader):
                 events['timestamps'] = events_df['timestamp'].values
                 
                 if 'line' in events_df.columns:
-                    events['ttl_lines'] = events_df['lines'].value
+                    events['ttl_lines'] = events_df['line'].values
                 if 'state' in events_df.columns:
-                    events['states'] = events_df['states'].values
+                    events['states'] = events_df['state'].values
                     
         return events
     
@@ -149,19 +142,9 @@ class PPDLoader(DataLoader):
             
             data = import_ppd(str(filepath))
             
-            metadata = {
-                'source' : 'ppd',
-                'file_path': str(filepath),
-                'channels': {
-                    'photo': 'GCaMp/GRABne signal',
-                    'isos': 'Isosbestic control signal',
-                    'sync': 'Sync signal'
-                }
-            }
             
             return PhotometryRecord(
                 filename=Path(filepath).name,
-                metadata=metadata,
                 photo=data['analog_1'],
                 isos=data['analog_2'],
                 sync=data['digital_1'],
@@ -169,7 +152,7 @@ class PPDLoader(DataLoader):
             )
             
         except Exception as e:
-            logger.errror(f"Error loading photometry data: {e}")
+            logger.error(f"Error loading photometry data: {e}")
             raise
         
 class DataManager:
