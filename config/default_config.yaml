@@ -1,0 +1,51 @@
+
+data_paths:
+  eeg_data_dir: "./EEGData"
+  photometry_data_dir: "./FiberPhotometryData"
+  output_dir: "./output"
+  seizure_onsets_file: "./config/seizure_onsets.json"
+
+preprocessing:
+  eeg_sampling_freq: 1000.0
+  notch_frequency: 60.0
+  notch_quality: 30.0
+  bandpass_low: 1.0
+  bandpass_high: 70.0
+  interpolation_threshold: 3.0
+
+  savgol_window: 301
+  savgol_polyorder: 4
+  gaussian_sigma: 75.0
+  lowpass_cutoff: 10.0
+  
+  exp_fit_max_iterations: 1000
+  exp_fit_bounds_multiplier: 2.0
+
+detection:
+  fs: 1000.0
+  tmul: 3.0
+  absthresh: 0.4
+  sur_time: 1000.0
+  close_to_edge: 0.1
+  too_high_abs: 1000000000.0
+  spkdur_min: 70.0
+  spkdur_max: 200.0
+  baseline_end_time: 0.0
+  baseline_start_time: 0.0
+  use_adaptive_detection: false
+  multi_channel_requirements: false
+
+visualization:
+  default_renderer: "browser"
+  max_plot_points: 10000
+  downsample_factor: 10
+  figure_width: 1200
+  figure_height: 800
+  line_width: 1.0
+  spike_marker_size: 10
+  spike_marker_color: "red"
+
+log_level: "INFO"
+log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+default_channel: 2
+processing_strategy: "meiling1"  # "meiling" or "chandni"
