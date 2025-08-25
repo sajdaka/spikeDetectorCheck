@@ -24,3 +24,10 @@ Usage Guide:
 - select the preprocessing pipeline you wish to run for this iteration
 - move to parameters and change as required
 - finally, use Run Spike Detection under analysis and either select Show Plots to view in a browser or Export Results for the plots to be stored locally
+
+Inputs:
+- EEG folder (OpenEphys data output)
+- Photometry file (.ppd)
+
+Output:
+- Plots containing both raw signal and preprocessed (.html)
