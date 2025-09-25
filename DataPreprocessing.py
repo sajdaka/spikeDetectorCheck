@@ -446,7 +446,7 @@ class ModularPhotometryPreprocessor(PhotometryPreprocessor):
             else:
                 df_f_corrected = (current_photo - current_isos)/ current_isos
                 if self.baseline_end_time > 0 and self.baseline_end_time > self.baseline_start_time:
-                    self.normalizer.baseline_zscore(df_f_corrected, self.baseline_end_time, self.baseline_start_time, self.sample_rate)
+                    z_df_f = self.normalizer.baseline_zscore(df_f_corrected, self.baseline_end_time, self.baseline_start_time, self.sample_rate)
                 else:
                     z_df_f = stats.zscore(df_f_corrected)
                 result.data = df_f_corrected

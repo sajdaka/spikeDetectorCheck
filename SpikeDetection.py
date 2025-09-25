@@ -42,15 +42,7 @@ class SpikeEvent:
         return (f"Spike detected at {self.time_seconds:.3f}s: "
                 f"amplitude={self.amplitude:.3f}, width={self.width_ms:.1f}ms")
         
-class SignalProcessor(Protocol):
-    
-    def process(self, signal: np.ndarray, params: SpikeDetectionParams) -> np.ndarray:
-        if self.Protocol == "meiling":
-            #branch to meiling's preprocessing
-            return
-        else:
-            #branch to chandni's preprocessing
-            return
+
 
 class BaselineNormalizer:
     
@@ -132,9 +124,11 @@ class SpikeDetector:
         hpdata = signal - np.nanmean(signal)
     
         
-        lthresh = np.median(np.abs(hpdata))
+        lthresh = np.std(np.abs(hpdata))
+        logger.info(f"EEG std found to be {lthresh}")
         thresh = lthresh * self.params.tmul
         effective_thresh = max(thresh, self.params.absthresh)
+        logger.info(f"Using height threshold {effective_thresh} and prominence {effective_thresh/2}")
         
         
         spkdur_samples = (
@@ -159,7 +153,7 @@ class SpikeDetector:
                 height=effective_thresh,          
                 distance=int(spkdur_samples[0]),  
                 width=(spkdur_samples[0]/4, spkdur_samples[1]/2),  
-                prominence=self.params.absthresh/2,   
+                prominence=effective_thresh/2,   
                 rel_height=0.5              
             )
             
@@ -193,8 +187,8 @@ class SpikeDetector:
             if spike.amplitude > self.params.too_high_abs:
                 continue
             
-            if not (self.params.spkdur_min <= spike.width_ms <= self.params.spkdur_max):
-                continue
+            #if not (self.params.spkdur_min <= spike.width_ms <= self.params.spkdur_max):
+             #   continue
             
             filtered.append(spike)
             

@@ -3,12 +3,13 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Counter, Dict, Any, Optional, List
 import threading
 import queue
 import logging
 from dataclasses import asdict
 import numpy as np
+
 
 
 from config import ConfigManager
@@ -668,26 +669,29 @@ class SpikeDetectionGUI:
                     self.current_photometry_file
                 )
                
-            processing_steps= [
+            self.processing_steps= [
                 self.step1_var.get(),
                 self.step2_var.get(),
                 self.step3_var.get()
             ] 
             
+            self.root.after(0, lambda: self.status_var.set("Preprocessing..."))
+            self.root.after(0, lambda: self.progress_var.set(50))
+            
             photometry_result = None
             if photometry_record:
                aligned_data = self.alignment.align_signals(eeg_record, photometry_record, self.channel_var.get())
                eeg_data = aligned_data['eeg']
+               photo_raw = aligned_data['gcamp']
               
                photometry_result = self.preprocessing_pipeline.process_photometry_modular(
                    aligned_data['gcamp'],
                    aligned_data['isos'],
-                   processing_steps=processing_steps,
+                   processing_steps=self.processing_steps,
                    time_vector=aligned_data['time']
                )
             
-            self.root.after(0, lambda: self.status_var.set("Preprocessing..."))
-            self.root.after(0, lambda: self.progress_var.set(50))
+
             
             
             eeg_result = self.preprocessing_pipeline.process_eeg(eeg_data)
@@ -701,16 +705,25 @@ class SpikeDetectionGUI:
             summary = self.spike_detector.get_detection_summary(spikes)
             
             self.root.after(0, lambda: self.progress_var.set(100))
-            
-            self.analysis_results = {
-                'spikes': spikes,
-                'summary': summary,
-                'eeg_result': eeg_result,
-                'photometry_result': photometry_result,
-                'eeg_raw': aligned_data['eeg'],
-                'photo_raw': aligned_data['gcamp']
-            }
-            
+            if photometry_record:
+                self.analysis_results = {
+                    'spikes': spikes,
+                    'summary': summary,
+                    'eeg_result': eeg_result,
+                    'photometry_result': photometry_result,
+                    'eeg_raw': aligned_data['eeg'],
+                    'photo_raw': photo_raw
+                }
+            else:
+                self.analysis_results = {
+                    'spikes': spikes,
+                    'summary': summary,
+                    'eeg_result': eeg_result,
+                    'eeg_raw': eeg_data
+                    
+                }
+                
+                
             self.root.after(0, self._display_results)
             self.root.after(0, lambda: self.status_var.set("Analysis complete"))
             
@@ -888,6 +901,7 @@ INDIVIDUAL SPIKES:
                 eeg_data=eeg_result.data,
                 eeg_raw=eeg_raw,
                 photometry_data=photometry_result.data,
+                photometry_data_z=photometry_result.metadata['z_df_f'],
                 photo_raw=photo_raw,
                 spikes=spikes,
                 time_vector=time_vector,
@@ -924,9 +938,25 @@ INDIVIDUAL SPIKES:
     
     def _save_results_to_directory(self, output_dir):
         import json
-        from pathlib import Path
+        import os
+        import re
+        import pandas as pd
         
+        parts = self.current_eeg_file.split('_')
+        if len(parts) >= 3:
+            part = re.search(r'(\d{4})', parts[2])
+            if part:  
+                mouse_code = part.group(1)
+            else:
+                logger.error("could not find mouse code")  
+                
+                    
+        
+        if mouse_code:
+            output_dir = os.path.join(output_dir, mouse_code)
+            logger.info(f"{output_dir}")
         output_path = Path(output_dir)
+        logger.info(f"Output path {output_path}")
         output_path.mkdir(parents=True, exist_ok=True)
         
         if self.current_eeg_file:
@@ -953,7 +983,7 @@ INDIVIDUAL SPIKES:
             'spikes': spikes_data,
             'configuration': {
                 'detection_params': asdict(self.spike_detector.params),
-                'processing_strategy': self.strategy_var.get()
+                'processing_strategy': self.processing_steps
             },
             'files': {
                 'eeg_file': self.current_eeg_file,
@@ -966,7 +996,11 @@ INDIVIDUAL SPIKES:
             json.dump(results, f, indent=2, default=str)
         
         eeg_result = self.analysis_results['eeg_result']
-        photometry_result = self.analysis_results['photometry_result']
+        
+        try:
+            photometry_result = self.analysis_results['photometry_result']
+        except KeyError:
+            photometry_result = None
         
         save_data = {
             'eeg_processed': eeg_result.data,
@@ -981,6 +1015,25 @@ INDIVIDUAL SPIKES:
         
         signals_file = output_path / f"{base_name}_signals.npz"
         np.savez_compressed(signals_file, **save_data)
+        
+        total_hours = [int(spike.time_seconds // 3600) for spike in spikes]
+        hour_counts = Counter(total_hours)
+        
+        max_hour = max(hour_counts) if hour_counts else 0
+        hourly_data = []
+        
+        for hour in range(max_hour + 1):
+            spike_count = hour_counts.get(hour, 0)
+            hourly_data.append({
+                'Hour': hour,
+                'Spike_Count': spike_count
+            })
+        
+        df = pd.DataFrame(hourly_data)
+        hourly_data_file = os.path.join(output_path, 'hourly_spike_count.xlsx')
+        df.to_excel(hourly_data_file, index=False)
+            
+            
         
         logger.info(f"Results saved to {output_path}")
     
