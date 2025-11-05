@@ -50,6 +50,17 @@ class PhotometryRecord(DataRecord):
     def duration_seconds(self) -> float:
         return self.n_samples / self.sample_rate
     
+@dataclass
+class TrainingDataRecord(DataRecord):
+    timestamps: np.ndarray
+    spikeIndicators: np.ndarray
+    
+    @property
+    def classification_proportions(self) -> float:
+        return np.sum(self.spikeIndicators == 1) / self.spikeIndicators.size
+    
+    
+    
 class DataLoader(ABC):
     
     @abstractmethod
@@ -155,12 +166,40 @@ class PPDLoader(DataLoader):
             logger.error(f"Error loading photometry data: {e}")
             raise
         
+class TrainingDataLoader(DataLoader):
+    def can_load(self, filepath: Union[str, Path]) -> bool:
+        path = Path(filepath)
+        return (path.suffix.lower() == '.csv' or path.suffix.lower() == '.xlsx') and path.exists()
+    
+    def load(self, filepath: Union[str, Path]) -> TrainingDataRecord:
+        try:
+            import pandas as pd
+            
+            data = pd.read_excel(filepath, usecols=['Time', 'Class'])
+            
+            timestamps = data['Time'].to_numpy()
+            timestamps = timestamps * 1000
+            indicators = data['Class'].to_numpy()
+            
+            
+            return TrainingDataRecord(
+                filename=Path(filepath).name,
+                timestamps=timestamps,
+                spikeIndicators=indicators
+            )
+            
+        except Exception as e:
+            logger.error(f"Error loading training data: {e}")
+            raise
+            
+        
 class DataManager:
     
     def __init__(self):
         self.loaders = [
             EEGLoader(),
             PPDLoader(),
+            TrainingDataLoader()
         ]
         self._cache: Dict[str, DataRecord] = {}
         
@@ -216,6 +255,14 @@ class DataManager:
         
         if not isinstance(record, PhotometryRecord):
             raise ValueError(f"Expected photometry data got EEG data")
+        
+        return record
+    
+    def load_training_data(self, filepath: Union[str, Path]) -> TrainingDataRecord:
+        record = self.load_data(filepath)
+        
+        if not isinstance(record, TrainingDataRecord):
+            raise ValueError(f"Expected training data got photometry or EEG")
         
         return record
     

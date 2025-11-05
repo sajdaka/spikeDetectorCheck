@@ -15,9 +15,10 @@ import numpy as np
 from config import ConfigManager
 from dataLoad import DataManager
 from DataPreprocessing import PreprocessingPipeline
-from SpikeDetection import SpikeDetector, SpikeDetectionParams
+from SpikeDetection import BaselineNormalizer, SpikeDetector, SpikeDetectionParams
 from visualization import InteractivePlotter
 from alignment import SignalAlignment
+from classifier import SpikeClassifier, classifier_start
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +662,13 @@ class SpikeDetectionGUI:
                 channel=self.channel_var.get()
             )
             
+            eeg_training_data, eeg_training_record = self.data_manager.load_eeg_data(
+                "./EEGData/2024-12-09_13-06-05_3154_GRABne",
+                channel=self.channel_var.get()
+            )
+            
+            training_data = self.data_manager.load_training_data("./TrainingData/Spike_labels_3154.xlsx")
+            
             self.root.after(0, lambda: self.progress_var.set(30))
             
             photometry_record = None
@@ -695,6 +703,8 @@ class SpikeDetectionGUI:
             
             
             eeg_result = self.preprocessing_pipeline.process_eeg(eeg_data)
+            eeg_training_result = self.preprocessing_pipeline.process_eeg(eeg_training_data)
+            
             
 
             
@@ -702,6 +712,15 @@ class SpikeDetectionGUI:
             self.root.after(0, lambda: self.progress_var.set(70))
             
             spikes = self.spike_detector.detect_spikes(eeg_result.data)
+            
+            self.root.after(0, lambda: self.status_var.set("Classifying spikes..."))
+            self.root.after(0, lambda: self.progress_var.set(90))
+            
+            eeg_result_zscore = BaselineNormalizer.baseline_zscore(eeg_result.data, self.config_manager.config.detection.baseline_end_time, self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
+            eeg_training_result_zscore = BaselineNormalizer.baseline_zscore(eeg_training_result.data, self.config_manager.config.detection.baseline_end_time, self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
+            
+            spikes = classifier_start(spikes, eeg_training_result.data, eeg_result.data, training_data, eeg_result_zscore, eeg_training_result_zscore)
+            
             summary = self.spike_detector.get_detection_summary(spikes)
             
             self.root.after(0, lambda: self.progress_var.set(100))
@@ -882,6 +901,9 @@ INDIVIDUAL SPIKES:
             return
         
         try:
+            
+            baseline_start = self.config_manager.config.detection.baseline_start_time
+            baseline_end = self.config_manager.config.detection.baseline_end_time
 
             seizure_onset = None
             if self.current_eeg_file:
@@ -894,11 +916,17 @@ INDIVIDUAL SPIKES:
             photo_raw = self.analysis_results['photo_raw']
             spikes = self.analysis_results['spikes']
             
+            if baseline_start < baseline_end:
+                eeg_data_z = BaselineNormalizer.baseline_zscore(eeg_result.data, baseline_end, baseline_start, self.config_manager.config.detection.fs)
+            else:
+                eeg_data_z = BaselineNormalizer.full_zscore(eeg_result)
+            
             fs = self.config_manager.config.detection.fs
             time_vector = np.arange(len(eeg_result.data)) / fs
             
             fig = self.plotter.create_comprehensive_plot(
                 eeg_data=eeg_result.data,
+                eeg_data_z=eeg_data_z, 
                 eeg_raw=eeg_raw,
                 photometry_data=photometry_result.data,
                 photometry_data_z=photometry_result.metadata['z_df_f'],

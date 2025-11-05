@@ -61,6 +61,7 @@ class InteractivePlotter:
     
     def create_comprehensive_plot(self,
                                   eeg_data: np.ndarray,
+                                  eeg_data_z: np.ndarray,
                                   eeg_raw: np.ndarray,
                                   photometry_data: Optional[np.ndarray] = None,
                                   photometry_data_z: Optional[np.ndarray] = None,
@@ -147,6 +148,8 @@ class InteractivePlotter:
                 row=2, col=2
             )
             
+            
+            
             fig.add_trace(
                 go.Scatter(
                     x=time_vector,
@@ -186,7 +189,9 @@ class InteractivePlotter:
                     row=4, col=1
                 )
             
-            segments_mean = np.mean(segments, axis=0)
+            max_segment = max(len(s) for s in segments)
+            padded_segments = [np.pad(s, (0, max_segment - len(s)), 'constant') for s in segments]
+            segments_mean = np.mean(padded_segments, axis=0)
             
             fig.add_trace(
                 go.Scatter(

@@ -77,6 +77,9 @@ class BaselineNormalizer:
 
         return (data - data_mean) / data_std
     
+
+        
+    
 class SpikeDetector:
     
     def __init__(self, params: SpikeDetectionParams):
@@ -123,12 +126,13 @@ class SpikeDetector:
         
         hpdata = signal - np.nanmean(signal)
     
+        baseline_std_hpdata = hpdata[int(self.params.baseline_start_time): int(self.params.baseline_end_time)]
         
-        lthresh = np.std(np.abs(hpdata))
+        lthresh = np.std(np.abs(baseline_std_hpdata))
         logger.info(f"EEG std found to be {lthresh}")
         thresh = lthresh * self.params.tmul
         effective_thresh = max(thresh, self.params.absthresh)
-        logger.info(f"Using height threshold {effective_thresh} and prominence {effective_thresh/2}")
+        logger.info(f"Using height threshold {effective_thresh} and prominence {effective_thresh*6}")
         
         
         spkdur_samples = (
@@ -153,7 +157,7 @@ class SpikeDetector:
                 height=effective_thresh,          
                 distance=int(spkdur_samples[0]),  
                 width=(spkdur_samples[0]/4, spkdur_samples[1]/2),  
-                prominence=effective_thresh/2,   
+                prominence=effective_thresh*6,   
                 rel_height=0.5              
             )
             

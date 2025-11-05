@@ -26,12 +26,12 @@ detection:
   tmul: 3.0
   absthresh: 0.4
   sur_time: 1000.0
-  close_to_edge: 0.1
+  close_to_edge: 0.05
   too_high_abs: 1000000000.0
-  spkdur_min: 70.0
-  spkdur_max: 200.0
-  baseline_end_time: 0.0
-  baseline_start_time: 0.0
+  spkdur_min: 50.0
+  spkdur_max: 250.0
+  baseline_end_time: 480.0
+  baseline_start_time: 120.0
   use_adaptive_detection: false
   multi_channel_requirements: false
 
@@ -47,5 +47,5 @@ visualization:
 
 log_level: "INFO"
 log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-default_channel: 2
+default_channel: 8
 processing_strategy: "meiling1"  # "meiling" or "chandni"
