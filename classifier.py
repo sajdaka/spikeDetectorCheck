@@ -369,8 +369,9 @@ class SpikeClassifier:
         
         test_features_norm = (test_features - self.mean) / self.std
         
-        predictions = self.model.predict(test_features_norm)  
+        
         probabilities = self.model.predict_proba(test_features_norm)[:, 1]
+        predictions = (probabilities >= 0.6).astype(int)[:, 1]
         logger.info("="*50)
         logger.info("MODEL EVALUATION")
         logger.info("="*50)
