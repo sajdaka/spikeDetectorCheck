@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 class SpikeClassifier:
     
-    def __init__(self, spikes: np.ndarray, training_eeg: np.ndarray, test_eeg: np.ndarray, training_data: TrainingDataRecord, eeg_zscore: float, eeg_training_zscore: float, fs: float = 1000.0):
+    def __init__(self, spikes: np.ndarray, training_eeg: np.ndarray, test_eeg: np.ndarray, training_data: TrainingDataRecord, eeg_zscore: float,
+                 eeg_training_zscore: float, fs: float = 1000.0, decision_threshold=0.5):
         self.spikes = spikes
         self.spikes_times = [spike.time_samples for spike in spikes]
         self.training_eeg = training_eeg
@@ -30,6 +31,7 @@ class SpikeClassifier:
         self.eeg_zscore = eeg_zscore
         self.eeg_training_zscore = eeg_training_zscore
         self.fs = fs
+        self.decision_threshold = decision_threshold
         
     def read_training_data(self):
         labels = []
@@ -340,14 +342,14 @@ class SpikeClassifier:
                 avg_score = np.mean(scores)
                 
                 if avg_score > best_score:
-                    best_score = avg_score
+                    self.best_score = avg_score
                     best_model = model.fit(training_features, labels)
                     self.best_model_name = model_name
                     
                 logger.info(f"CV score: {avg_score:.3f} (+/- {np.std(scores):.3f})")
         
         self.model = best_model
-        logger.info(F"Best model: {self.best_model_name} with score {best_score:.3f}")
+        logger.info(F"Best model: {self.best_model_name} with score {self.best_score:.3f}")
         plt.figure()
         plt.imshow(training_features[np.argsort(self.labels),:])
         plt.savefig("features.png", format='png')
@@ -360,10 +362,10 @@ class SpikeClassifier:
     def run_logistical_regression(self):
         test_features = self.build_features(self.spikes_times, self.test_eeg, self.eeg_zscore)
         test_features = (test_features - self.mean) / self.std
-        self.predictions = self.model.predict(test_features)
-        logger.info(f"predictions: {self.predictions}")
         self.probabilities = self.model.predict_proba(test_features)
         logger.info(f"probabilities: {self.probabilities}")
+        self.predictions = (self.probabilities[:, 1] >= self.decision_threshold).astype(int)
+        logger.info(f"predictions: {self.predictions}")
         
     def evaluate_model(self, test_features, test_labels):
         
@@ -371,7 +373,7 @@ class SpikeClassifier:
         
         
         probabilities = self.model.predict_proba(test_features_norm)[:, 1]
-        predictions = (probabilities >= 0.6).astype(int)[:, 1]
+        predictions = (probabilities >= self.decision_threshold).astype(int)
         logger.info("="*50)
         logger.info("MODEL EVALUATION")
         logger.info("="*50)
@@ -421,13 +423,14 @@ class SpikeClassifier:
     
 
         
-def classifier_start(spikes: np.ndarray, test_eeg: np.ndarray, training_eeg: np.ndarray, training_data: TrainingDataRecord, eeg_zscore: float, eeg_training_zscore: float):
+def classifier_start(spikes: np.ndarray, test_eeg: np.ndarray, training_eeg: np.ndarray, training_data: TrainingDataRecord, eeg_zscore: float, eeg_training_zscore: float,
+                     decision_threshold: float = 0.5):
     #use the gui preprocessor somehow potentially do that before classification in the master file
-    classifier_model = SpikeClassifier(spikes, training_eeg, test_eeg, training_data, eeg_zscore, eeg_training_zscore)
+    classifier_model = SpikeClassifier(spikes, training_eeg, test_eeg, training_data, eeg_zscore, eeg_training_zscore, decision_threshold=decision_threshold)
     classifier_model.init_logistical_regression()
     
-    # classifier_model.run_logistical_regression()
-    # classifier_model.visualize_logistic_regression()
+    classifier_model.run_logistical_regression()
+    classifier_model.visualize_logistic_regression()
     return classifier_model.get_predicted_spikes()
     
         

@@ -1,5 +1,6 @@
 
 
+from email import message
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
@@ -19,6 +20,7 @@ from SpikeDetection import BaselineNormalizer, SpikeDetector, SpikeDetectionPara
 from visualization import InteractivePlotter
 from alignment import SignalAlignment
 from classifier import SpikeClassifier, classifier_start
+from spike_labeler import SpikeLabelingGUI
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +279,12 @@ class SpikeDetectionGUI:
         self.current_photometry_file = None
         self.analysis_results = None
         self.processing_thread = None
+        
+        #classifier initializations
+        self.detected_spikes = None
+        self.classifier_eeg_data = None
+        self.trained_classifier = None
+        self.training_data_file = None
 
         self.root = tk.Tk()
         self.root.title("Spike Detection Toolkit")
@@ -444,6 +452,41 @@ class SpikeDetectionGUI:
 
         self.status_var = tk.StringVar(value="Ready")
         ttk.Label(parent, textvariable=self.status_var).pack(pady=5)
+        
+        ttk.Separator(parent, orient='horizontal').pack(fill='x', pady=10)
+        
+        ttk.Label(
+            parent,
+            text="Classifier Training",
+            font=('Arial', 10, 'bold')
+        ).pack(pady=5)
+        
+        self.label_button = ttk.Button(
+            parent,
+            text='Label Detected Spikes',
+            command=self.open_spike_labeler,
+            state='disabled'
+        )
+        self.label_button.pack(pady=5, fill='x')
+        
+        training_frame = ttk.Frame(parent)
+        training_frame.pack(fill='x', pady=5)
+        
+        ttk.Label(training_frame, text="Training Labels:").pack(side='left', padx=5)
+        self.training_file_var = tk.StringVar()
+        ttk.Entry(training_frame, textvariable=self.training_file_var, width=30).pack(side='left', expand=True, fill='x', padx=5)
+        ttk.Button(training_frame, text="Browse...", command=self.load_training_labels).pack(side='right', padx=5)
+        
+        self.train_button = ttk.Button(
+            parent,
+            text="Train Classifier",
+            command=self.train_classifier,
+            state='disabled'
+        )
+        self.train_button.pack(pady=5, fill='x')
+        
+        self.classifier_info_var = tk.StringVar(value="No classifier trained")
+        ttk.Label(parent, textvariable=self.classifier_info_var, foreground='gray').pack(pady=2)
     
     def setup_results_panel(self, parent):
 
@@ -560,6 +603,178 @@ class SpikeDetectionGUI:
         self.processing_thread.daemon = True
         self.processing_thread.start()
         
+        
+    def open_spike_labeler(self):
+        """Open spike labeling GUI for the researcher to label spikes"""
+        if self.detected_spikes is None or len(self.detected_spikes) == 0:
+            messagebox.showwarning(
+                "No EEG Data",
+                "EEG detected spike data is not available rerun with looser parameters"
+            )  
+            return
+        if self.classifier_eeg_data is None:
+            messagebox.showerror(
+                "No EEG Data",
+                "EEG data is not available. Please reload the data"
+            )
+            return
+        
+        try:
+            logger.info(f"Opening spike labeler with {len(self.detected_spikes)} detected spikes")
+            
+            uncertainty_scores = None
+            if self.trained_classifier is None:
+                try:
+                    spike_times = [spike.time_samples for spike in self.detected_spikes]
+                    normalizer = BaselineNormalizer()
+                    eeg_zscore = normalizer.baseline_zscore(self.classifier_eeg_data.data, self.config_manager.config.detection.baseline_end_time,
+                                                            self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
+                    
+                    features = self.trained_classifier.build_features(
+                        np.array(spike_times),
+                        self.classifier_eeg_data.data,
+                        eeg_zscore
+                    )
+                    
+                    features = np.array(features)
+                    features_norm = (features - self.trained_classifier.mean) / self.trained_classifier.std
+                    
+                    probabilities = self.trained_classifier.model.predict_proba(features_norm)
+                    
+                    uncertainty_scores = np.abs(probabilities[:, 1] - 0.5)
+                    
+                    logger.info("Sorted spikes by uncertainty for optimal labeling")
+                except Exception as e:
+                    logger.warning(f"Could not calculate uncertainty scores {e}")
+            
+            existing_labels_file = self.training_file_var.get() if hasattr(self, 'training_file_var') else None
+            
+            labeler = SpikeLabelingGUI(
+                parent=self.root,
+                detected_spikes=self.detected_spikes,
+                eeg_data=self.classifier_eeg_data.data,
+                fs=self.config_manager.config.detection.fs,
+                existing_labels_file=existing_labels_file if existing_labels_file else None,
+                uncertainty_scores=uncertainty_scores
+            )
+        except Exception as e:
+            logger.error(f"Failed to open spike labeler: {e}")
+            messagebox.showerror("Error", f"Failed to open spike labeler:\n{str(e)}")
+            
+            
+    def load_training_labels(self):
+        """Load training labels file"""
+        filename = filedialog.askopenfilename(
+            title="Select Training Labels File",
+            filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv")],
+            initialdir=Path.cwd() / "TrainingData"
+        )
+        
+        if filename:
+            self.training_file_var.set(filename)
+            self.training_data_file = filename
+            
+            self.train_button.config(state='normal')
+            
+            try:
+                import pandas as pd
+                df = pd.read_excel(filename) if filename.endswith('.xlsx') else pd.read_csv(filename)
+                
+                n_samples = len(df)
+                n_artifacts = sum(df['Class'] == 0)
+                n_spikes = sum(df['Class'] == 1)
+                
+                logger.info(f"Loaded training data: {n_samples} samples ({n_artifacts} artifacts), {n_spikes} spikes)")
+            except Exception as e:
+                logger.error(f"Failed to load training data {e}")
+                messagebox.showerror("Error", f"Failed to load training data:\n{str(e)}")
+            
+     
+    def train_classifier(self):
+        """Train spike classifier on labeled data"""
+        if not self.training_data_file:
+            messagebox.showwarning(
+                "No training data",
+                "Please load training labels first"
+            ) 
+            return
+        
+        if self.classifier_eeg_data is None:
+            messagebox.showerror(
+                "No EEG Data",
+                "No EEG data is available. Please reload this data"
+            )
+            return
+        
+        def train_worker():
+            try:
+                self.status_var.set("Training classifier...")
+                self.progress_var.set(0)
+                
+                data_manager = DataManager()
+                training_data = data_manager.load_training_data(self.training_data_file)
+                
+                logger.info(f"Training with {len(training_data.timestamps)} labeled samples")
+                
+                training_eeg = self.classifier_eeg_data.data
+                
+                normalizer = BaselineNormalizer()
+                eeg_zscore = normalizer.full_zscore(training_eeg)
+                
+                class Spike:
+                    def __init__(self, time):
+                        self.time_samples = time
+                        
+                training_spikes = [Spike(int(t)) for t in training_data.timestamps]
+                
+                classifier = SpikeClassifier(
+                    spikes=np.array(training_spikes),
+                    training_eeg=training_eeg,
+                    test_eeg=training_eeg,
+                    training_data=training_data,
+                    eeg_zscore=eeg_zscore,
+                    eeg_training_zscore=eeg_zscore,
+                    fs=self.config_manager.config.detection.fs
+                )
+                
+                logger.info("Starting classifier training")
+                classifier.init_logistical_regression()
+                
+                self.trained_classifier = classifier
+                
+
+            except Exception as e:
+                logger.error(f"Classifier training failed: {e}")
+                import traceback
+                traceback.print_exc()
+                self.root.after(0, lambda: messagebox.showerre(
+                    "Training Failed",
+                    f"Classifier training failed:\n{str(e)}"
+                ))
+                self.root.after(0, lambda: self.status_var.set("Training failed"))
+            finally:
+                self.root.after(0, lambda: self.progress_var.set(0))
+    
+        thread = threading.Thread(target=train_worker, daemon=True)
+        thread.start()
+        self.root.after(0, lambda: self.classifier_info_var.set(
+            f"Classifier trained | Model: {self.trained_classifier.best_model_name} | F1: {self.trained_classifier.best_score:.3f}"
+            ))
+                
+        self.root(0, lambda: self.status_var.set("Classifier training complete"))
+        self.root.after(0, lambda: messagebox.showinfo(
+            "Training Completed",
+            f"Classifier trained successfully!\n\n"
+            f"Model: {self.trained_classifier.best_model_name}\n"
+            f"F1 Score: {self.trained_classifier.best_score:.3f}\n"
+            f"Training samples: {len(self.training_data.timestamps)}"
+        ))
+                
+                
+                
+                
+                
+                
     def _update_components_from_gui(self):
         
         try:
@@ -662,12 +877,6 @@ class SpikeDetectionGUI:
                 channel=self.channel_var.get()
             )
             
-            eeg_training_data, eeg_training_record = self.data_manager.load_eeg_data(
-                "./EEGData/2024-12-09_13-06-05_3154_GRABne",
-                channel=self.channel_var.get()
-            )
-            
-            training_data = self.data_manager.load_training_data("./TrainingData/Spike_labels_3154.xlsx")
             
             self.root.after(0, lambda: self.progress_var.set(30))
             
@@ -703,7 +912,7 @@ class SpikeDetectionGUI:
             
             
             eeg_result = self.preprocessing_pipeline.process_eeg(eeg_data)
-            eeg_training_result = self.preprocessing_pipeline.process_eeg(eeg_training_data)
+            
             
             
 
@@ -713,13 +922,11 @@ class SpikeDetectionGUI:
             
             spikes = self.spike_detector.detect_spikes(eeg_result.data)
             
-            self.root.after(0, lambda: self.status_var.set("Classifying spikes..."))
-            self.root.after(0, lambda: self.progress_var.set(90))
+            self.detected_spikes = spikes
+            self.classifier_eeg_data = eeg_result
+            self.root.after(0, lambda: self.label_button.config(state='normal'))
             
-            eeg_result_zscore = BaselineNormalizer.baseline_zscore(eeg_result.data, self.config_manager.config.detection.baseline_end_time, self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
-            eeg_training_result_zscore = BaselineNormalizer.baseline_zscore(eeg_training_result.data, self.config_manager.config.detection.baseline_end_time, self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
             
-            spikes = classifier_start(spikes, eeg_training_result.data, eeg_result.data, training_data, eeg_result_zscore, eeg_training_result_zscore)
             
             summary = self.spike_detector.get_detection_summary(spikes)
             
@@ -745,6 +952,7 @@ class SpikeDetectionGUI:
                 
             self.root.after(0, self._display_results)
             self.root.after(0, lambda: self.status_var.set("Analysis complete"))
+            logger.info(f"Detected {len(spikes)} spikes - ready for labeling")
             
         except Exception as e:
             logger.error(f"Analysis error: {e}")
