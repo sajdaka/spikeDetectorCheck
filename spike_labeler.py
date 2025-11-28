@@ -189,17 +189,18 @@ class SpikeLabelingGUI:
         spike = self.detected_spikes[self.current_index]
 
         
-        window_samples = int(0.5 * self.fs)  # 500ms
+        window_samples = int(1.5 * self.fs)  # 500ms
         start_idx = max(0, int(spike.time_samples - window_samples))
         end_idx = min(len(self.eeg_data), int(spike.time_samples + window_samples))
 
         segment = self.eeg_data[start_idx:end_idx]
+        segment = segment * (10 **6)
         time_axis = (np.arange(len(segment)) - (spike.time_samples - start_idx)) / self.fs * 1000  # ms
 
         
         self.ax.clear()
         self.ax.plot(time_axis, segment, 'b-', linewidth=1)
-        self.ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Detected spike')
+        #self.ax.axvline(0, color='red', linestyle='--', linewidth=2, label='Detected spike')
 
         
         spike_window_ms = 50
@@ -207,6 +208,7 @@ class SpikeLabelingGUI:
 
         self.ax.set_xlabel('Time relative to spike (ms)', fontsize=12)
         self.ax.set_ylabel('EEG Signal (µV)', fontsize=12)
+        self.ax.set_ylim([-500, 500])
         self.ax.set_title(
             f'Spike at {spike.time_seconds:.2f}s | Amplitude: {spike.amplitude:.2f} | Width: {spike.width_ms:.1f}ms',
             fontsize=14,

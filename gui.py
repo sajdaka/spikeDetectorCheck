@@ -1,15 +1,15 @@
 
 
-from email import message
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
+from tracemalloc import start
 from typing import Counter, Dict, Any, Optional, List
 import threading
-import queue
 import logging
 from dataclasses import asdict
 import numpy as np
+import pandas as pd
 
 
 
@@ -374,6 +374,19 @@ class SpikeDetectionGUI:
         eeg_frame = ttk.LabelFrame(parent, text="EEG Data")
         eeg_frame.pack(fill='x', padx=5, pady=5)
         
+        type_frame = ttk.Frame(eeg_frame)
+        type_frame.pack(fill='x', padx=5, pady=2)
+        ttk.Label(type_frame, text="EEG Format:").pack(side='left')
+        self.eeg_type_var = tk.StringVar(value="OpenEphys")
+        eeg_type_combo = ttk.Combobox(
+            type_frame,
+            textvariable=self.eeg_type_var,
+            values=["OpenEphys", "Natus EDF"],
+            state='readonly',
+            width=15
+        )
+        eeg_type_combo.pack(side='left', padx=5)
+        
         self.eeg_file_var = tk.StringVar()
         ttk.Entry(eeg_frame, textvariable=self.eeg_file_var, width=30).pack(side='left', padx=5, pady=5)
         ttk.Button(eeg_frame, text="Browse...", command=self.load_eeg_data).pack(side='right', padx=5, pady=5)
@@ -381,7 +394,7 @@ class SpikeDetectionGUI:
         channel_frame = ttk.Frame(eeg_frame)
         channel_frame.pack(fill='x', padx=5, pady=2)
         ttk.Label(channel_frame, text="Channel:").pack(side='left')
-        self.channel_var = tk.IntVar(value=self.config_manager.config.default_channel)
+        self.channel_var = tk.StringVar(value=self.config_manager.config.default_channel)
         ttk.Spinbox(channel_frame, from_=0, to=32, textvariable=self.channel_var, width=5).pack(side='left', padx=5)
         
         strategy_main_frame = ttk.LabelFrame(parent, text='Processing Strategy')
@@ -424,6 +437,7 @@ class SpikeDetectionGUI:
         self.photo_file_var = tk.StringVar()
         ttk.Entry(photo_frame, textvariable=self.photo_file_var, width=50).pack(side='left', padx=5, pady=5)
         ttk.Button(photo_frame, text="Browse...", command=self.load_photometry_data).pack(side='right', padx=5, pady=5)
+        
     
     def setup_analysis_controls(self, parent):
         ttk.Button(
@@ -530,10 +544,18 @@ class SpikeDetectionGUI:
     
     # Event handlers
     def load_eeg_data(self):
-        filename = filedialog.askdirectory(
-            title="Select EEG Data Directory",
-            initialdir=self.config_manager.config.data_paths.eeg_data_dir
-        )
+        eeg_type = self.eeg_type_var.get()
+        if eeg_type == "Natus EDF":
+            filename = filedialog.askopenfilename(
+                title="Select Natus EDF File",
+                initialdir=self.config_manager.config.data_paths.eeg_data_dir,
+                filetypes=[("EDF files", "*.EDF")]
+            )
+        else:
+            filename = filedialog.askdirectory(
+                title="Select EEG Data Directory",
+                initialdir=self.config_manager.config.data_paths.eeg_data_dir
+            )
         if filename:
             self.eeg_file_var.set(filename)
             self.current_eeg_file = filename
@@ -791,7 +813,7 @@ class SpikeDetectionGUI:
             logger.info("All components updated using user's parameters")
             
         except Exception as e:
-            logger.errro(f"Error updating components from GUI: {e}")
+            logger.error(f"Error updating components from GUI: {e}")
             raise
     
     def _apply_gui_params_to_config(self, gui_params: Dict[str, Any]):
@@ -857,7 +879,8 @@ class SpikeDetectionGUI:
             spkdur_min=config.detection.spkdur_min,
             spkdur_max=config.detection.spkdur_max,
             channel=self.channel_var.get(),  # Get current channel from GUI
-            baseline_end_time=config.detection.baseline_end_time
+            baseline_end_time=config.detection.baseline_end_time,
+            baseline_start_time=config.detection.baseline_start_time
         )
         
         self.spike_detector = SpikeDetector(detection_params)
@@ -910,25 +933,41 @@ class SpikeDetectionGUI:
             
 
             
+            #eeg_data = eeg_data[:int(1800 *self.config_manager.config.detection.fs)]
             
-            eeg_result = self.preprocessing_pipeline.process_eeg(eeg_data)
             
             
+            eeg_result = self.preprocessing_pipeline.process_eeg(eeg_data, eeg_record.sample_rate)
+            
+            print(len(eeg_data))
             
 
             
             self.root.after(0, lambda: self.status_var.set("Detecting spikes..."))
             self.root.after(0, lambda: self.progress_var.set(70))
             
+            #eeg_zscored = BaselineNormalizer.baseline_zscore(eeg_result.data, self.config_manager.config.detection.baseline_end_time, self.config_manager.config.detection.baseline_start_time, self.config_manager.config.detection.fs)
+            
             spikes = self.spike_detector.detect_spikes(eeg_result.data)
+            eeg_zscored = BaselineNormalizer.baseline_zscore(eeg_result.data,
+                                                             self.config_manager.config.detection.baseline_end_time,
+                                                             self.config_manager.config.detection.baseline_start_time,
+                                                             self.config_manager.config.detection.fs)
             
             self.detected_spikes = spikes
             self.classifier_eeg_data = eeg_result
             self.root.after(0, lambda: self.label_button.config(state='normal'))
             
             
+            from datetime import datetime, timedelta
+            time_from_start = timedelta(seconds=eeg_record.timestamps[-1])
+            start_time = timedelta(hours=10)
+            actual_time = start_time + time_from_start
+            print(actual_time)
             
             summary = self.spike_detector.get_detection_summary(spikes)
+            
+            
             
             self.root.after(0, lambda: self.progress_var.set(100))
             if photometry_record:
@@ -945,6 +984,7 @@ class SpikeDetectionGUI:
                     'spikes': spikes,
                     'summary': summary,
                     'eeg_result': eeg_result,
+                    'eeg_zscored': eeg_zscored,
                     'eeg_raw': eeg_data
                     
                 }
@@ -1117,11 +1157,12 @@ INDIVIDUAL SPIKES:
             if self.current_eeg_file:
                 filename = Path(self.current_eeg_file).name
                 seizure_onset = self.config_manager.get_seizure_onset(filename)
-        
+
             eeg_result = self.analysis_results['eeg_result']
-            photometry_result = self.analysis_results['photometry_result']
             eeg_raw = self.analysis_results['eeg_raw']
-            photo_raw = self.analysis_results['photo_raw']
+            if 'photometry_result' in self.analysis_results:
+                photometry_result = self.analysis_results['photometry_result']
+                photo_raw = self.analysis_results['photo_raw']
             spikes = self.analysis_results['spikes']
             
             if baseline_start < baseline_end:
@@ -1131,19 +1172,29 @@ INDIVIDUAL SPIKES:
             
             fs = self.config_manager.config.detection.fs
             time_vector = np.arange(len(eeg_result.data)) / fs
-            
-            fig = self.plotter.create_comprehensive_plot(
-                eeg_data=eeg_result.data,
-                eeg_data_z=eeg_data_z, 
-                eeg_raw=eeg_raw,
-                photometry_data=photometry_result.data,
-                photometry_data_z=photometry_result.metadata['z_df_f'],
-                photo_raw=photo_raw,
-                spikes=spikes,
-                time_vector=time_vector,
-                seizure_onset=seizure_onset/fs,
-                title=f"Analysis: {Path(self.current_eeg_file).name if self.current_eeg_file else 'Unknown'}"
-            )
+            if 'photometry_result' in self.analysis_results:
+                fig = self.plotter.create_comprehensive_plot(
+                    eeg_data=eeg_result.data,
+                    eeg_data_z=eeg_data_z, 
+                    eeg_raw=eeg_raw,
+                    photometry_data=photometry_result.data,
+                    photometry_data_z=photometry_result.metadata['z_df_f'],
+                    photo_raw=photo_raw,
+                    spikes=spikes,
+                    time_vector=time_vector,
+                    seizure_onset=seizure_onset/fs if seizure_onset is not None else None,
+                    title=f"Analysis: {Path(self.current_eeg_file).name if self.current_eeg_file else 'Unknown'}"
+                )
+            else:
+                fig = self.plotter.create_comprehensive_plot(
+                    eeg_data=eeg_result.data,
+                    eeg_data_z=eeg_data_z,
+                    eeg_raw=eeg_raw,
+                    spikes=spikes,
+                    time_vector=time_vector,
+                    seizure_onset=seizure_onset/fs if seizure_onset is not None else None,
+                    title=f"Analysis: {Path(self.current_eeg_file).name if self.current_eeg_file else 'Unknown'}"
+                )
             
             fig.show()
             
@@ -1172,20 +1223,49 @@ INDIVIDUAL SPIKES:
             except Exception as e:
                 messagebox.showerror("Export Error", f"Error exporting results: {e}")
     
+    def _create_spike_graph(self, spike, output_path):
+        import matplotlib.pyplot as plt
+        
+        window_sample = int(1.5 * self.config_manager.config.detection.fs)
+        
+        start_idx = max(0, int(spike.time_samples - window_sample))
+        end_idx = min(len(self.analysis_results['eeg_result'].data), int(spike.time_samples + window_sample))
+        
+        segment = self.analysis_results['eeg_result'].data[start_idx:end_idx]
+        
+        time_axis = (np.arange(len(segment)) - (spike.time_samples - start_idx)) / self.config_manager.config.detection.fs * 1000
+        
+        fig, ax = plt.subplots(figsize=(10,4))
+        ax.plot(time_axis, segment, 'b-', linewidth=1)
+        
+        spike_window_ms = 50
+        ax.axvspan(-spike_window_ms, spike_window_ms, alpha=0.2, color='yellow')
+        
+        ax.set_xlabel('Time relative to spike (ms)', fontsize=10)
+        ax.set_ylabel('EEG Signal (µV)', fontsize=10)
+        ax.set_title(f"Spike at {spike.time_seconds:.2f}s | Amplitude: {spike.amplitude:.2f} | Width: {spike.width_ms:.1f}ms",
+                     fontsize=11,
+                     fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
+        plt.close(fig)
+    
     def _save_results_to_directory(self, output_dir):
         import json
         import os
         import re
         import pandas as pd
+        from datetime import datetime, timedelta
         
         parts = self.current_eeg_file.split('_')
         if len(parts) >= 3:
             part = re.search(r'(\d{4})', parts[2])
             if part:  
                 mouse_code = part.group(1)
-            else:
-                logger.error("could not find mouse code")  
-                
+        else:
+            mouse_code = self.channel_var.get()
                     
         
         if mouse_code:
@@ -1211,7 +1291,7 @@ INDIVIDUAL SPIKES:
                 'amplitude': float(spike.amplitude),
                 'width_ms': float(spike.width_ms),
                 'prominence': float(spike.prominence),
-                'channel': int(spike.channel)
+                'channel': spike.channel
             })
         
         results = {
@@ -1232,6 +1312,7 @@ INDIVIDUAL SPIKES:
             json.dump(results, f, indent=2, default=str)
         
         eeg_result = self.analysis_results['eeg_result']
+        eeg_zscored = self.analysis_results['eeg_zscored']
         
         try:
             photometry_result = self.analysis_results['photometry_result']
@@ -1240,7 +1321,10 @@ INDIVIDUAL SPIKES:
         
         save_data = {
             'eeg_processed': eeg_result.data,
-            'eeg_metadata': eeg_result.metadata
+            'eeg_zscored': eeg_zscored,
+            'eeg_metadata': eeg_result.metadata,
+            'sampling_rate': self.config_manager.config.detection.fs,
+            'channel': self.channel_var.get()
         }
         
         if photometry_result:
@@ -1251,26 +1335,72 @@ INDIVIDUAL SPIKES:
         
         signals_file = output_path / f"{base_name}_signals.npz"
         np.savez_compressed(signals_file, **save_data)
-        
-        total_hours = [int(spike.time_seconds // 3600) for spike in spikes]
-        hour_counts = Counter(total_hours)
-        
-        max_hour = max(hour_counts) if hour_counts else 0
-        hourly_data = []
-        
-        for hour in range(max_hour + 1):
-            spike_count = hour_counts.get(hour, 0)
-            hourly_data.append({
-                'Hour': hour,
-                'Spike_Count': spike_count
+
+        # Generate 15-minute interval statistics
+        logger.info("Generating 15-minute interval statistics...")
+
+        # Create 24 intervals (10:00-16:00 = 6 hours = 24 fifteen-minute intervals)
+        interval_data = []
+        interval_duration = 900  # 15 minutes in seconds
+        channel = self.channel_var.get()
+
+        # Get the processed EEG data for microVolt calculations
+        eeg_processed = self.analysis_results['eeg_result'].data
+
+        for interval_idx in range(24):
+            # Calculate time window
+            interval_start_seconds = interval_idx * interval_duration
+            interval_end_seconds = (interval_idx + 1) * interval_duration
+
+            # Format time window as HH:MM-HH:MM
+            start_time = timedelta(hours=10) + timedelta(seconds=interval_start_seconds)
+            end_time = timedelta(hours=10) + timedelta(seconds=interval_end_seconds)
+
+            # Format as HH:MM
+            start_str = f"{start_time.seconds // 3600:02d}:{(start_time.seconds % 3600) // 60:02d}"
+            end_str = f"{end_time.seconds // 3600:02d}:{(end_time.seconds % 3600) // 60:02d}"
+            time_window = f"{start_str}-{end_str}"
+
+            # Filter spikes in this interval
+            interval_spikes = [
+                s for s in spikes
+                if interval_start_seconds <= s.time_seconds < interval_end_seconds
+            ]
+
+            # Calculate statistics
+            spike_count = len(interval_spikes)
+            avg_amplitude_zscore = np.mean([s.amplitude for s in interval_spikes]) if interval_spikes else 0.0
+            avg_width = np.mean([s.width_ms for s in interval_spikes]) if interval_spikes else 0.0
+
+            # Calculate average amplitude in microvolts from processed EEG
+            if interval_spikes:
+                amplitudes_uv = []
+                for spike in interval_spikes:
+                    # Get the amplitude from the processed (non-z-scored) EEG signal
+                    spike_idx = int(spike.time_samples)
+                    if 0 <= spike_idx < len(eeg_processed):
+                        # Convert to microvolts (multiply by 10^6)
+                        amplitude_uv = eeg_processed[spike_idx] * (10 ** 6)
+                        amplitudes_uv.append(amplitude_uv)
+                avg_amplitude_uv = np.mean(amplitudes_uv) if amplitudes_uv else 0.0
+            else:
+                avg_amplitude_uv = 0.0
+
+            interval_data.append({
+                'Channel': channel,
+                'Date': '',
+                'Time_Window': time_window,
+                'Total_Spike_Count': spike_count,
+                'Average_Spike_Amplitude_uV': avg_amplitude_uv,
+                'Average_Spike_Amplitude_ZScore': avg_amplitude_zscore,
+                'Average_Spike_Width_ms': avg_width
             })
-        
-        df = pd.DataFrame(hourly_data)
-        hourly_data_file = os.path.join(output_path, 'hourly_spike_count.xlsx')
-        df.to_excel(hourly_data_file, index=False)
-            
-            
-        
+
+        df = pd.DataFrame(interval_data)
+        interval_stats_file = output_path / f'{base_name}_15min_interval_stats.xlsx'
+        df.to_excel(interval_stats_file, index=False)
+        logger.info(f"Saved 15-minute interval statistics: {interval_stats_file}")
+
         logger.info(f"Results saved to {output_path}")
     
     def clear_results(self):

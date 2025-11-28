@@ -3,6 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
+import matplotlib.pyplot as plt
 from dataclasses import dataclass
 import logging
 
@@ -76,19 +77,30 @@ class InteractivePlotter:
             subplot_titles = ['Raw EEG Signal', 'Processed EEG', 'Raw Photometry Signal', 'Processed Photometry Signal',
                               'Processed EEG with Markers on Spikes', 'Spike Segments Overlaid', 'Spike Segments Averaged']
 
-                
-            fig = make_subplots(
-                rows=4,
-                cols=2,
-                subplot_titles=subplot_titles,
-                vertical_spacing=0.08,
-                specs=[
-                    [{}, {}],
-                    [{}, {}],
-                    [{"colspan": 2}, None],
-                    [{}, {}]
-                ]
-            )
+            if photometry_data:   
+                fig = make_subplots(
+                    rows=5,
+                    cols=2,
+                    subplot_titles=subplot_titles,
+                    vertical_spacing=0.08,
+                    specs=[
+                        [{}, {}],
+                        [{}, {}],
+                        [{"colspan": 2}, None],
+                        [{}, {}]
+                    ]
+                )
+            else:
+                fig = make_subplots(
+                    rows=2,
+                    cols=2,
+                    subplot_titles=['Raw EEG Signal', 'Processed EEG', 'Processed EEG with Markers on Spikes'],
+                    vertical_spacing=0.08,
+                    specs=[
+                        [{}, {}],
+                        [{"colspan": 2}, None]
+                    ],
+                )
             
             if time_vector is None:
                 time_vector = np.arange(len(eeg_data))
@@ -125,30 +137,33 @@ class InteractivePlotter:
                 ),
                 row=1, col=2
             )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=time_vector,
-                    y=photo_raw,
-                    mode='lines',
-                    name='Raw Photometry',
-                    line=dict(width=self.config.line_width, color='yellow')
-                ),
-                row=2, col=1
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=time_vector,
-                    y=photometry_data_z,
-                    mode='lines',
-                    name='Procesed Photometry',
-                    line= dict(width=self.config.line_width, color='green')
-                ),
-                row=2, col=2
-            )
-            
-            
+            if photometry_data:
+                fig.add_trace(
+                    go.Scatter(
+                        x=time_vector,
+                        y=photo_raw,
+                        mode='lines',
+                        name='Raw Photometry',
+                        line=dict(width=self.config.line_width, color='yellow')
+                    ),
+                    row=2, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=time_vector,
+                        y=photometry_data_z,
+                        mode='lines',
+                        name='Procesed Photometry',
+                        line= dict(width=self.config.line_width, color='green')
+                    ),
+                    row=2, col=2
+                )
+                
+            if photometry_data:
+                eegRow = 3
+            else:
+                eegRow = 2
             
             fig.add_trace(
                 go.Scatter(
@@ -158,7 +173,7 @@ class InteractivePlotter:
                     name='Processed Photometry with Spike indicators',
                     line=dict(width=self.config.line_width, color='black')
                 ),
-                row=3, col=1
+                row=eegRow, col=1
             )
             for spike in spikes:
                 fig.add_trace(
@@ -171,37 +186,39 @@ class InteractivePlotter:
                                     color='red'),
                         showlegend=False
                     ),
-                    row=3, col=1
+                    row=eegRow, col=1
                 )
+            if photometry_data:  
+                segments = self._get_photometry_segments(spikes, photometry_data_z, seizure_onset)
+                segment_x = np.arange(7)
                 
-            segments = self._get_photometry_segments(spikes, photometry_data_z, seizure_onset)
-            segment_x = np.arange(7)
-            
-            for segment in segments:
+                for segment in segments:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=segment_x,
+                            y=segment,
+                            mode='lines',
+                            line=dict(width=self.config.line_width, color='grey'),
+                            showlegend=False
+                        ),
+                        row=4, col=1
+                    )
+                
+                max_segment = max(len(s) for s in segments)
+                padded_segments = [np.pad(s, (0, max_segment - len(s)), 'constant') for s in segments]
+                segments_mean = np.mean(padded_segments, axis=0)
+                
                 fig.add_trace(
                     go.Scatter(
                         x=segment_x,
-                        y=segment,
+                        y=segments_mean,
                         mode='lines',
-                        line=dict(width=self.config.line_width, color='grey'),
-                        showlegend=False
+                        line=dict(width=self.config.line_width, color='brown')
                     ),
-                    row=4, col=1
-                )
+                    row=4, col=2
+                )    
             
-            max_segment = max(len(s) for s in segments)
-            padded_segments = [np.pad(s, (0, max_segment - len(s)), 'constant') for s in segments]
-            segments_mean = np.mean(padded_segments, axis=0)
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=segment_x,
-                    y=segments_mean,
-                    mode='lines',
-                    line=dict(width=self.config.line_width, color='brown')
-                ),
-                row=4, col=2
-            )    
+        
                 
             fig.update_layout(
                 title=title,
@@ -219,6 +236,10 @@ class InteractivePlotter:
             fig.update_xaxes(title_text="Time (s.)", row=2, col=1)
             fig.update_yaxes(title_text="Amplitude", row=1, col=1)
             fig.update_yaxes(title_text="Amplitude", row=2, col=1)
+            
+            # plt.hist(time_vector, eeg_data_z)
+            # plt.show()
+            # plt.close()
             
             return fig
         

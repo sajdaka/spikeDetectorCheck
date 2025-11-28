@@ -1,12 +1,12 @@
 
 data_paths:
-  eeg_data_dir: "./EEGData"
+  eeg_data_dir: "/nfs/turbo/umms-mattislab/Chandni/Data/Natus/FCD/Xiaogang_Chemogenetics/"
   photometry_data_dir: "./FiberPhotometryData"
   output_dir: "./output"
   seizure_onsets_file: "./config/seizure_onsets.json"
 
 preprocessing:
-  eeg_sampling_freq: 1000.0
+  eeg_sampling_freq: 4096.0
   notch_frequency: 60.0
   notch_quality: 30.0
   bandpass_low: 1.0
@@ -22,14 +22,14 @@ preprocessing:
   exp_fit_bounds_multiplier: 2.0
 
 detection:
-  fs: 1000.0
-  tmul: 3.0
+  fs: 4096.0
+  tmul: 4.5
   absthresh: 0.4
   sur_time: 1000.0
   close_to_edge: 0.05
   too_high_abs: 1000000000.0
-  spkdur_min: 50.0
-  spkdur_max: 250.0
+  spkdur_min: 20.0
+  spkdur_max: 200.0
   baseline_end_time: 480.0
   baseline_start_time: 120.0
   use_adaptive_detection: false
@@ -47,5 +47,5 @@ visualization:
 
 log_level: "INFO"
 log_format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-default_channel: 8
+default_channel: '4 RP'
 processing_strategy: "meiling1"  # "meiling" or "chandni"

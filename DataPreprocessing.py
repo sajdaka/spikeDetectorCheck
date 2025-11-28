@@ -4,10 +4,11 @@ from typing import Dict, Any, Optional, Tuple, Protocol, Union, List
 import numpy as np
 from scipy import signal, stats
 from scipy import interpolate
-from scipy.signal import butter, filtfilt, savgol_filter, iirnotch
+from scipy.signal import butter, filtfilt, savgol_filter, iirnotch, resample_poly, sosfiltfilt
 from scipy.optimize import curve_fit
 from scipy.stats import linregress
 from scipy.interpolate import interp1d
+from math import gcd
 import logging
 
 from SpikeDetection import BaselineNormalizer
@@ -53,7 +54,7 @@ class EEGPreprocessor(BasePreprocessor):
                  notch_quality: float = 30.0,
                  bandpass_low: float = 1.0,
                  bandpass_high: float = 70.0,
-                 artifact_threshold: float = 3.0):
+                 artifact_threshold: float = 0):
         super().__init__("EEG_Preprocessor")
         self.sample_rate = sample_rate
         self.notch_freq = notch_freq
@@ -62,7 +63,7 @@ class EEGPreprocessor(BasePreprocessor):
         self.bandpass_high = bandpass_high
         self.artifact_threshold = artifact_threshold
         
-    def process(self, data: np.ndarray, **kwargs) -> PreprocessingResult:
+    def process(self, data: np.ndarray, actual_sample_rate: Optional[float], **kwargs) -> PreprocessingResult:
         
         result = PreprocessingResult(
             data=data.copy(),
@@ -72,12 +73,17 @@ class EEGPreprocessor(BasePreprocessor):
         
         try:
             result.data = self._apply_notch_filter(result.data)
+            if actual_sample_rate and actual_sample_rate != self.sample_rate:
+                divisor = gcd(int(actual_sample_rate), int(self.sample_rate))
+                up = int(self.sample_rate / divisor)
+                down = int(actual_sample_rate / divisor)
+                result.data = resample_poly(result.data, up, down, window=('kaiser', 5.0))
             
-            if self.artifact_threshold > 0:
-                result.data, interpolated_regions = self._interpolate_artifacts(
-                    result.data, self.artifact_threshold
-                )
-                result.metadata['interpolated_regions'] = interpolated_regions
+            # if self.artifact_threshold > 0:
+            #     result.data, interpolated_regions = self._interpolate_artifacts(
+            #         result.data, self.artifact_threshold
+            #     )
+            #     result.metadata['interpolated_regions'] = interpolated_regions
                 
             result.data = self._apply_bandpass_filter(result.data)
             result.metadata['final_shape'] = result.data.shape
@@ -97,11 +103,31 @@ class EEGPreprocessor(BasePreprocessor):
         low = self.bandpass_low / nyquist
         high = self.bandpass_high / nyquist
         
-        if high >= 1.0:
-            high = 0.99
+        if low < 0.01:
+            order = 2
+            logger.info(f"Using order {order} filter for low normalized frequency")
+        elif low < 0.05:
+            order = 3
+            logger.info(f"Using order {order} filter for low normalized frequency")
+        else:
+            order = 4
         
-        b, a = butter(4, [low, high], btype='band')
-        return filtfilt(b, a, data)
+        sos = butter(order, [low, high], btype='band', output='sos')
+        filtered = sosfiltfilt(sos, data)
+        
+        if np.any(np.isnan(filtered)):
+            logger.error("Bandpass filter produced NaN values")
+            raise ValueError("Bandpass filter failed")
+        
+        if np.any(np.isinf(filtered)):
+            logger.error("Bandpass filter produced inf values")
+            raise ValueError("Bandpass filter failed")
+        
+        logger.info(f"Filtering successful: output range [{np.min(filtered):.2f}, {np.max(filtered):.2f}]")
+        
+            
+        
+        return filtered
     
     def _interpolate_artifacts(self, data: np.ndarray, threshold: float) -> Tuple[np.ndarray, list]:
         cleaned_signal = data.copy()
@@ -523,8 +549,8 @@ class PreprocessingPipeline:
             )
         }
         
-    def process_eeg(self, data: np.ndarray, **kwargs) -> PreprocessingResult:
-        return self.eeg_preprocessor.process(data, **kwargs)
+    def process_eeg(self, data: np.ndarray, sample_rate: Optional[float], **kwargs) -> PreprocessingResult:
+        return self.eeg_preprocessor.process(data, sample_rate, **kwargs)
     
     def process_photometry(self,
                            photo_data: np.ndarray,

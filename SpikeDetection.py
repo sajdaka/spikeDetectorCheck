@@ -124,15 +124,24 @@ class SpikeDetector:
     
     def _detect_spikes_core(self, signal: np.ndarray) -> List[SpikeEvent]:
         
-        hpdata = signal - np.nanmean(signal)
-    
-        baseline_std_hpdata = hpdata[int(self.params.baseline_start_time): int(self.params.baseline_end_time)]
+        signal_zscored = BaselineNormalizer.baseline_zscore(
+           signal,
+           self.params.baseline_end_time,
+           self.params.baseline_start_time,
+           self.params.fs
+        )
+       
+        baseline_start_idx = int(self.params.baseline_start_time * self.params.fs)
+        baseline_end_idx = int(self.params.baseline_end_time * self.params.fs)
+        baseline_segment = signal_zscored[baseline_start_idx:baseline_end_idx]
+       
+        baseline_std = np.std(baseline_segment)
         
-        lthresh = np.std(np.abs(baseline_std_hpdata))
-        logger.info(f"EEG std found to be {lthresh}")
-        thresh = lthresh * self.params.tmul
+        #lthresh = signal.mean()
+        thresh = baseline_std * self.params.tmul
         effective_thresh = max(thresh, self.params.absthresh)
-        logger.info(f"Using height threshold {effective_thresh} and prominence {effective_thresh*6}")
+        logger.info(f"Baseline std: {baseline_std:.3f} (should be ~1.0)")
+        logger.info(f"Threshold: {effective_thresh:.2f} SD: (tmul={self.params.tmul})")
         
         
         spkdur_samples = (
@@ -147,18 +156,18 @@ class SpikeDetector:
         # Detect both positive and negative spikes
         for polarity in ['positive', 'negative']:
             if polarity == 'negative':
-                signal_data = -hpdata  # Invert for negative spike detection
+                signal_data = -signal_zscored  # Invert for negative spike detection
             else:
-                signal_data = hpdata
+                signal_data = signal_zscored
             
             
             peaks, peak_properties = find_peaks(
                 signal_data,
                 height=effective_thresh,          
                 distance=int(spkdur_samples[0]),  
-                width=(spkdur_samples[0]/4, spkdur_samples[1]/2),  
-                prominence=effective_thresh*6,   
-                rel_height=0.5              
+                width=(spkdur_samples[0], spkdur_samples[1]),  
+                prominence=effective_thresh*0.5,   
+                #rel_height=0.5              
             )
             
             for i, peak_idx in enumerate(peaks):
@@ -182,6 +191,7 @@ class SpikeDetector:
         
         filtered = []
         close_samples = int(self.params.close_to_edge * self.params.fs)
+        seizureTimes = [(0,0), (0,0)]
         
         for spike in spikes:
             
@@ -189,6 +199,13 @@ class SpikeDetector:
                 continue
             
             if spike.amplitude > self.params.too_high_abs:
+                continue
+            
+            inSeizure = False
+            for seizure in seizureTimes:
+                if spike.time_seconds > seizure[0] and spike.time_seconds < seizure[1]:
+                    inSeizure = True
+            if inSeizure:
                 continue
             
             #if not (self.params.spkdur_min <= spike.width_ms <= self.params.spkdur_max):
@@ -201,30 +218,37 @@ class SpikeDetector:
         return filtered
     
     def _remove_duplicates(self, spikes: List[SpikeEvent]) -> List[SpikeEvent]:
-        
+        """
+        Remove duplicate spikes that are too close together.
+        Optimized O(n) version - only checks last accepted spike since spikes are sorted.
+        """
         if len(spikes) <= 1:
             return spikes
-        
+
+        # Sort by time
         spikes.sort(key=lambda x: x.time_samples)
-        
+
         filtered = []
-        min_seperation = int(100e-3 * self.params.fs)
-        
+        min_seperation = int(10e-3 * self.params.fs)
+
         for spike in spikes:
-            
-            too_close = False
-            for accepted_spike in filtered:
-                if abs(spike.time_samples - accepted_spike.time_samples) < min_seperation:
-                    if spike.prominence > accepted_spike.prominence:
-                        filtered.remove(accepted_spike)
-                        break
-                    else:
-                        too_close = True
-                        break
-                    
-            if not too_close:
+            # Only check the last accepted spike (spikes are sorted!)
+            if filtered:
+                last_spike = filtered[-1]
+                distance = spike.time_samples - last_spike.time_samples
+
+                if distance < min_seperation:
+                    # Too close - keep the one with higher prominence
+                    if spike.prominence > last_spike.prominence:
+                        filtered[-1] = spike  # Replace last with current
+                    # else: skip current spike (last is better)
+                else:
+                    # Far enough apart - accept this spike
+                    filtered.append(spike)
+            else:
+                # First spike - always accept
                 filtered.append(spike)
-                
+
         return filtered
     
     def get_detection_summary(self, spikes: List[SpikeEvent]) -> Dict[str, Any]:

@@ -5,6 +5,8 @@ from typing import Dict, Any, Optional, Union, Tuple
 import numpy as np
 import logging
 from open_ephys.analysis import Session
+import mne
+from scipy.signal import decimate
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +73,93 @@ class DataLoader(ABC):
     def can_load(self, filepath: Union[str, Path]) -> bool:
         pass
     
+class NatusEDFLoader(DataLoader):
+    
+    def __init__(self, max_samples: Optional[int] = None):
+        self.max_samples = max_samples
+        
+    def can_load(self, filepath: Union[str, Path]) -> bool:
+        path = Path(filepath)
+        if not path.exists():
+            return False
+        if path.suffix.lower() not in ['.edf', '.edf+']:
+            return False
+        try:
+            mne.io.read_raw_edf(str(path), preload=False, verbose=False)
+            return True
+        except Exception:
+            return False
+        
+    def load(self, filepath: Union[str, Path], channel: Optional[Union[int, str]] = None) -> EEGRecord:
+        try:
+            raw = mne.io.read_raw_edf(str(filepath), include=[channel], preload=False, verbose=False)
+            
+            sample_rate = raw.info['sfreq']
+            
+
+            start_time = 3 * 60 * 60
+            end_time = 9 * 60 * 60
+            
+            start_sample = int(start_time * sample_rate)
+            end_sample = int(end_time * sample_rate)
+            
+            
+            raw.crop(tmin=start_time, tmax=end_time)
+            
+            data = raw.get_data()[0]
+
+            n_samples = data.shape[0]
+            timestamps = np.arange(n_samples) / sample_rate
+            sample_numbers = np.arange(n_samples)
+            
+            events = self._extract_events(raw, n_samples)
+            
+            del raw
+            
+            return EEGRecord(
+                filename=Path(filepath).name,
+                data=data,
+                sample_rate=sample_rate,
+                timestamps=timestamps,
+                sample_numbers=sample_numbers,
+                events=events
+            )
+        except Exception as e:
+            logger.error(f"Error loading Natus EDF data: {e}")
+            raise
+        
+    def _extract_events(self, raw, n_samples: int) -> Dict[str, np.ndarray]:
+        events = {
+            'sample_number': np.array([]),
+            'timestamps': np.array([]),
+            'descriptions': np.array([]),
+            'durations': np.array([])
+        }
+        
+        if raw.annotations is not None and len(raw.annotations) > 0:
+            onset_time = raw.annotations.onset
+            description = raw.annotations.description
+            durations = raw.annotations.duration
+            
+            sample_rate = raw.info['sfreq']
+            sample_numbers = (onset_time * sample_rate).astype(int)
+            
+            valid_indices = sample_numbers < n_samples
+            
+            events['sample_number'] = sample_numbers[valid_indices]
+            events['timestamps'] = onset_time[valid_indices]
+            events['descriptions'] = description[valid_indices]
+            events['durations'] = durations[valid_indices]
+            
+        return events
+    
+    
+    
+    
 class EEGLoader(DataLoader):
     
     def __init__(self, max_samples: Optional[int] = None):
-        self.max_samples = max_samples or 1220000
+        self.max_samples = max_samples or 12200000000
         
     def can_load(self, filepath: Union[str, Path]) -> bool:
         path = Path(filepath)
@@ -198,6 +283,7 @@ class DataManager:
     def __init__(self):
         self.loaders = [
             EEGLoader(),
+            NatusEDFLoader(),
             PPDLoader(),
             TrainingDataLoader()
         ]
@@ -230,23 +316,31 @@ class DataManager:
     
     def load_eeg_data(self,
                       filepath: Union[str, Path],
-                      channel: Optional[int] = None) -> Tuple[np.ndarray, EEGRecord]:
-        record = self.load_data(filepath)
+                      channel: Optional[Union[int, str]] = None) -> Tuple[np.ndarray, EEGRecord]:
+        loader = self._find_loader(filepath)
         
-        if not isinstance(record, EEGRecord):
-            raise ValueError(f"Expected EEG data, got photometry")
-        
-        if channel is not None:
-            if record.data.ndim == 1:
-                if channel != 0:
-                    raise ValueError(f"Channel {channel} is not available in EEG data")
-                channel_data = record.data
-            else:
-                if channel >= record.n_channels:
-                    raise ValueError(f"Channel is not available data has {record.n_channels} channels")
-                channel_data = record.data[channel, :]
+        if isinstance(loader, NatusEDFLoader) and channel is not None:
+            logger.info(f"loading {filepath} channel {channel} using {loader.__class__.__name__}")
+            record = loader.load(filepath, channel=channel)
+            channel_data = record.data if record.data.ndim == 1 else record.data[0, :]
+            return channel_data, record
         else:
-            channel_data = record.data
+            record = self.load_data(filepath)
+            
+            if not isinstance(record, EEGRecord):
+                raise ValueError(f"Expected EEG data, got photometry")
+            
+            if channel is not None:
+                if record.data.ndim == 1:
+                    if channel != 0:
+                        raise ValueError(f"Channel {channel} is not available in EEG data")
+                    channel_data = record.data
+                else:
+                    if channel >= record.n_channels:
+                        raise ValueError(f"Channel is not available data has {record.n_channels} channels")
+                    channel_data = record.data[channel, :]
+            else:
+                channel_data = record.data                    
         
         return channel_data, record
     
