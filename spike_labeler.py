@@ -194,7 +194,7 @@ class SpikeLabelingGUI:
         end_idx = min(len(self.eeg_data), int(spike.time_samples + window_samples))
 
         segment = self.eeg_data[start_idx:end_idx]
-        segment = segment * (10 **6)
+        segment = segment
         time_axis = (np.arange(len(segment)) - (spike.time_samples - start_idx)) / self.fs * 1000  # ms
 
         

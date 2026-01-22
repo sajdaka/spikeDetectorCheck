@@ -325,6 +325,7 @@ class DataManager:
             channel_data = record.data if record.data.ndim == 1 else record.data[0, :]
             return channel_data, record
         else:
+            channel = int(channel)
             record = self.load_data(filepath)
             
             if not isinstance(record, EEGRecord):

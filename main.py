@@ -176,15 +176,15 @@ class SpikeDetectionApplication:
             return 1
         
     def _generate_plots(self, eeg_result, photometry_result, spikes, aligned_data, args):
-        
+
         try:
             logger.info("Generating plots")
-            
+
             seizure_onset = None
             if args.eeg_file:
                 filename = Path(args.eeg_file).name
                 seizure_onset = self.config_manager.get_seizure_onset(filename)
-                
+
             fig = self.plotter.create_comprehensive_plot(
                 eeg_data=eeg_result.data,
                 photometry_data=photometry_result.data,
@@ -193,10 +193,18 @@ class SpikeDetectionApplication:
                 seizure_onset=seizure_onset,
                 title=f'Analysis: {Path(args.eeg_file).name}'
             )
-            
+
+            output_dir = Path(self.config.data_paths.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            plot_filename = f'spike_analysis_{Path(args.eeg_file).stem}.html'
+            plot_path = output_dir / plot_filename
+            fig.write_html(str(plot_path))
+            logger.info(f"Plot saved to {plot_path}")
+
             fig.show()
             logger.info("Plots generated successfully")
-        
+
         except Exception as e:
             logger.error(f"Error generating plots: {e}")
             

@@ -920,7 +920,7 @@ class SpikeDetectionGUI:
             
             photometry_result = None
             if photometry_record:
-               aligned_data = self.alignment.align_signals(eeg_record, photometry_record, self.channel_var.get())
+               aligned_data = self.alignment.align_signals(eeg_record, photometry_record, int(self.channel_var.get()))
                eeg_data = aligned_data['eeg']
                photo_raw = aligned_data['gcamp']
               
@@ -975,6 +975,7 @@ class SpikeDetectionGUI:
                     'spikes': spikes,
                     'summary': summary,
                     'eeg_result': eeg_result,
+                    'eeg_zscored': eeg_zscored,
                     'photometry_result': photometry_result,
                     'eeg_raw': aligned_data['eeg'],
                     'photo_raw': photo_raw
@@ -1147,9 +1148,9 @@ INDIVIDUAL SPIKES:
         if not self.analysis_results:
             messagebox.showwarning("No analysis results available. Run analysis first.")
             return
-        
+
         try:
-            
+
             baseline_start = self.config_manager.config.detection.baseline_start_time
             baseline_end = self.config_manager.config.detection.baseline_end_time
 
@@ -1164,18 +1165,18 @@ INDIVIDUAL SPIKES:
                 photometry_result = self.analysis_results['photometry_result']
                 photo_raw = self.analysis_results['photo_raw']
             spikes = self.analysis_results['spikes']
-            
+
             if baseline_start < baseline_end:
                 eeg_data_z = BaselineNormalizer.baseline_zscore(eeg_result.data, baseline_end, baseline_start, self.config_manager.config.detection.fs)
             else:
                 eeg_data_z = BaselineNormalizer.full_zscore(eeg_result)
-            
+
             fs = self.config_manager.config.detection.fs
             time_vector = np.arange(len(eeg_result.data)) / fs
             if 'photometry_result' in self.analysis_results:
                 fig = self.plotter.create_comprehensive_plot(
                     eeg_data=eeg_result.data,
-                    eeg_data_z=eeg_data_z, 
+                    eeg_data_z=eeg_data_z,
                     eeg_raw=eeg_raw,
                     photometry_data=photometry_result.data,
                     photometry_data_z=photometry_result.metadata['z_df_f'],
@@ -1195,9 +1196,17 @@ INDIVIDUAL SPIKES:
                     seizure_onset=seizure_onset/fs if seizure_onset is not None else None,
                     title=f"Analysis: {Path(self.current_eeg_file).name if self.current_eeg_file else 'Unknown'}"
                 )
-            
+
+            output_dir = Path(self.config_manager.config.data_paths.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            plot_filename = f'spike_analysis_{Path(self.current_eeg_file).stem if self.current_eeg_file else "unknown"}.html'
+            plot_path = output_dir / plot_filename
+            fig.write_html(str(plot_path))
+            logger.info(f"Plot saved to {plot_path}")
+
             fig.show()
-            
+
         except Exception as e:
             messagebox.showerror("Plot Error", f"Error creating plot: {e}")
     
@@ -1268,7 +1277,7 @@ INDIVIDUAL SPIKES:
             mouse_code = self.channel_var.get()
                     
         
-        if mouse_code:
+        if mouse_code is not None:
             output_dir = os.path.join(output_dir, mouse_code)
             logger.info(f"{output_dir}")
         output_path = Path(output_dir)
@@ -1380,7 +1389,7 @@ INDIVIDUAL SPIKES:
                     spike_idx = int(spike.time_samples)
                     if 0 <= spike_idx < len(eeg_processed):
                         # Convert to microvolts (multiply by 10^6)
-                        amplitude_uv = eeg_processed[spike_idx] * (10 ** 6)
+                        amplitude_uv = eeg_processed[spike_idx]
                         amplitudes_uv.append(amplitude_uv)
                 avg_amplitude_uv = np.mean(amplitudes_uv) if amplitudes_uv else 0.0
             else:

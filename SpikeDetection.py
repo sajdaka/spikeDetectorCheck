@@ -126,47 +126,47 @@ class SpikeDetector:
         
         baseline_start = self.params.baseline_start_time
         baseline_end = self.params.baseline_end_time
-        segment_duration = 5 * 60 * self.params.fs
-        segments_num = 6
+        # segment_duration = 5 * 60 * self.params.fs
+        # segments_num = 6
         
-        baseline_period = signal[int(baseline_start * self.params.fs) : int(baseline_end * self.params.fs)]
-        segments = []
-        for i in range(segments_num):
-            segment_start = i * segment_duration
-            segment_end = (i + 1) * segment_duration
-            segment = baseline_period[segment_start: segment_end]
-            segments.append(np.std(segment))
+        # baseline_period = signal[int(baseline_start * self.params.fs) : int(baseline_end * self.params.fs)]
+        # segments = []
+        # for i in range(segments_num):
+        #     segment_start = i * segment_duration
+        #     segment_end = (i + 1) * segment_duration
+        #     segment = baseline_period[segment_start: segment_end]
+        #     segments.append(np.std(segment))
             
-        segments_std = np.array(segments)
+        # segments_std = np.array(segments)
         
-        mean_std = np.mean(segments_std)
-        std_of_std = np.std(segments_std)
-        cv = (std_of_std / mean_std) *100
-        min_cv = cv
-        min_baseline_start = baseline_start
-        min_baseline_end = baseline_end
+        # mean_std = np.mean(segments_std)
+        # std_of_std = np.std(segments_std)
+        # cv = (std_of_std / mean_std) *100
+        # min_cv = cv
+        # min_baseline_start = baseline_start
+        # min_baseline_end = baseline_end
         
-        while(cv > 20):
-            if(baseline_end + 5 * 60 > 3600):
-                cv = min_cv
-                baseline_start = min_baseline_start
-                baseline_end = min_baseline_end
-                break
-            if min_cv > cv:
-                min_baseline_start = baseline_start
-                min_baseline_end = baseline_end
-                min_cv = cv
-            segments.pop(0)
-            baseline_start += 5 * 60 
-            baseline_end += 5 * 60
-            new_segment_start = int((baseline_start + (5 * 60))* self.params.fs) 
-            new_segment_end = int(baseline_end * self.params.fs)
-            added_segment = signal[new_segment_start: new_segment_end]
-            segments.append(np.std(added_segment))
-            segments_std = np.array(segments)
-            mean_std = np.mean(segments_std)
-            std_of_std = np.std(segments_std)
-            cv = (std_of_std / mean_std) * 100
+        # while(cv > 20):
+        #     if(baseline_end + 5 * 60 > 3600):
+        #         cv = min_cv
+        #         baseline_start = min_baseline_start
+        #         baseline_end = min_baseline_end
+        #         break
+        #     if min_cv > cv:
+        #         min_baseline_start = baseline_start
+        #         min_baseline_end = baseline_end
+        #         min_cv = cv
+        #     segments.pop(0)
+        #     baseline_start += 5 * 60 
+        #     baseline_end += 5 * 60
+        #     new_segment_start = int((baseline_start + (5 * 60))* self.params.fs) 
+        #     new_segment_end = int(baseline_end * self.params.fs)
+        #     added_segment = signal[new_segment_start: new_segment_end]
+        #     segments.append(np.std(added_segment))
+        #     segments_std = np.array(segments)
+        #     mean_std = np.mean(segments_std)
+        #     std_of_std = np.std(segments_std)
+        #     cv = (std_of_std / mean_std) * 100
         
         signal_zscored = BaselineNormalizer.baseline_zscore(
            signal,
@@ -175,16 +175,16 @@ class SpikeDetector:
            self.params.fs
         )
        
-        baseline_start_idx = int(self.params.baseline_start_time * self.params.fs)
-        baseline_end_idx = int(self.params.baseline_end_time * self.params.fs)
-        baseline_segment = signal_zscored[baseline_start_idx:baseline_end_idx]
+        # baseline_start_idx = int(self.params.baseline_start_time * self.params.fs)
+        # baseline_end_idx = int(self.params.baseline_end_time * self.params.fs)
+        # baseline_segment = signal_zscored[baseline_start_idx:baseline_end_idx]
        
-        baseline_std = np.std(baseline_segment)
+        # baseline_std = np.std(baseline_segment)
         
         #lthresh = signal.mean()
-        thresh = baseline_std * self.params.tmul
-        effective_thresh = max(thresh, self.params.absthresh)
-        logger.info(f"Baseline std: {baseline_std:.3f} (should be ~1.0)")
+        # thresh = baseline_std * self.params.tmul
+        effective_thresh = max(self.params.tmul, self.params.absthresh)
+        # logger.info(f"Baseline std: {baseline_std:.3f} (should be ~1.0)")
         logger.info(f"Threshold: {effective_thresh:.2f} SD: (tmul={self.params.tmul})")
         
         
@@ -235,7 +235,7 @@ class SpikeDetector:
         
         filtered = []
         close_samples = int(self.params.close_to_edge * self.params.fs)
-        seizureTimes = [(0,0), (0,0)]
+        seizureTimes = [(0,0)]
         
         for spike in spikes:
             

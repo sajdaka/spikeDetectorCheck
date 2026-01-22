@@ -77,9 +77,9 @@ class InteractivePlotter:
             subplot_titles = ['Raw EEG Signal', 'Processed EEG', 'Raw Photometry Signal', 'Processed Photometry Signal',
                               'Processed EEG with Markers on Spikes', 'Spike Segments Overlaid', 'Spike Segments Averaged']
 
-            if photometry_data:   
+            if photometry_data is not None:   
                 fig = make_subplots(
-                    rows=5,
+                    rows=4,
                     cols=2,
                     subplot_titles=subplot_titles,
                     vertical_spacing=0.08,
@@ -137,7 +137,7 @@ class InteractivePlotter:
                 ),
                 row=1, col=2
             )
-            if photometry_data:
+            if photometry_data is not None:
                 fig.add_trace(
                     go.Scatter(
                         x=time_vector,
@@ -160,7 +160,7 @@ class InteractivePlotter:
                     row=2, col=2
                 )
                 
-            if photometry_data:
+            if photometry_data is not None:
                 eegRow = 3
             else:
                 eegRow = 2
@@ -188,7 +188,7 @@ class InteractivePlotter:
                     ),
                     row=eegRow, col=1
                 )
-            if photometry_data:  
+            if photometry_data is not None:  
                 segments = self._get_photometry_segments(spikes, photometry_data_z, seizure_onset)
                 segment_x = np.arange(7)
                 
@@ -240,6 +240,8 @@ class InteractivePlotter:
             # plt.hist(time_vector, eeg_data_z)
             # plt.show()
             # plt.close()
+            plt.savefig("test.png", format='png')
+
             
             return fig
         
