@@ -111,6 +111,7 @@ class EEGPreprocessor(BasePreprocessor):
             logger.info(f"Using order {order} filter for low normalized frequency")
         else:
             order = 4
+        order = 4
         
         sos = butter(order, [low, high], btype='band', output='sos')
         filtered = sosfiltfilt(sos, data)

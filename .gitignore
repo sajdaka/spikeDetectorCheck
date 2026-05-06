@@ -1,0 +1,8 @@
+autosaves/
+data/
+output/
+download/
+visualizations/
+joss_preflight.md
+.DS_Store
+__pycache__/
