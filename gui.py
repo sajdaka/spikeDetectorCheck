@@ -381,7 +381,7 @@ class SpikeDetectionGUI:
         eeg_type_combo = ttk.Combobox(
             type_frame,
             textvariable=self.eeg_type_var,
-            values=["OpenEphys", "Natus EDF"],
+            values=["OpenEphys", "Natus EDF", "MATLAB .mat"],
             state='readonly',
             width=15
         )
@@ -550,6 +550,12 @@ class SpikeDetectionGUI:
                 title="Select Natus EDF File",
                 initialdir=self.config_manager.config.data_paths.eeg_data_dir,
                 filetypes=[("EDF files", "*.EDF")]
+            )
+        elif eeg_type == "MATLAB .mat":
+            filename = filedialog.askopenfilename(
+                title="Select MATLAB .mat File",
+                initialdir=self.config_manager.config.data_paths.eeg_data_dir,
+                filetypes=[("MATLAB files", "*.mat"), ("All files", "*.*")]
             )
         else:
             filename = filedialog.askdirectory(

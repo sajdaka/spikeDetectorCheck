@@ -7,6 +7,7 @@ import logging
 from open_ephys.analysis import Session
 import mne
 from scipy.signal import decimate
+import scipy.io
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,43 @@ class EEGLoader(DataLoader):
                     
         return events
     
+class MATLoader(DataLoader):
+
+    SAMPLE_RATE = 500.0
+
+    def can_load(self, filepath: Union[str, Path]) -> bool:
+        path = Path(filepath)
+        return path.suffix.lower() == '.mat' and path.exists()
+
+    def load(self, filepath: Union[str, Path]) -> EEGRecord:
+        try:
+            mat = scipy.io.loadmat(str(filepath), squeeze_me=True, struct_as_record=False)
+        except NotImplementedError:
+            import h5py
+            with h5py.File(str(filepath), 'r') as f:
+                mat = {k: np.array(f[k]) for k in f.keys() if isinstance(f[k], h5py.Dataset)}
+
+        data = np.asarray(mat['EEG'], dtype=float)
+
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        elif data.shape[0] > data.shape[1]:
+            data = data.T
+
+        n_samples = data.shape[1]
+        timestamps = np.arange(n_samples) / self.SAMPLE_RATE
+
+        return EEGRecord(
+            filename=Path(filepath).name,
+            data=data,
+            sample_rate=self.SAMPLE_RATE,
+            timestamps=timestamps,
+            sample_numbers=np.arange(n_samples),
+            events={'sample_number': np.array([]), 'timestamps': np.array([]),
+                    'descriptions': np.array([]), 'durations': np.array([])}
+        )
+
+
 class PPDLoader(DataLoader):
     
     def can_load(self, filepath: Union[str, Path]) -> bool:
@@ -284,6 +322,7 @@ class DataManager:
         self.loaders = [
             EEGLoader(),
             NatusEDFLoader(),
+            MATLoader(),
             PPDLoader(),
             TrainingDataLoader()
         ]

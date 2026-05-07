@@ -241,7 +241,7 @@ class SpikeViewerGUI:
         else:
             signal = self.eeg_data
             ylabel = 'EEG Signal (µV)'
-            ylim = [-7500, 7500]
+            ylim = [-1, 1]
             
         window_samples = int(1.5 * self.fs)
         start_idx = max(0, spike.time_samples - window_samples)
